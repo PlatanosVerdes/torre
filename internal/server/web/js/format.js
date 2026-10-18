@@ -37,15 +37,17 @@ export function delay(min) {
 }
 
 export function tone(f) {
+  if (f.doubtful) return f.delayMin >= 15 ? 'warn' : 'ok';
   if (GO.has(f.status)) return 'go';
   if (BAD.has(f.status)) return 'bad';
-  if (WARN.has(f.status) || f.delayMin >= 15 || (f.status === 'BOR' && !f.final)) return 'warn';
+  if (WARN.has(f.status) || f.delayMin >= 15) return 'warn';
   if (OK.has(f.status)) return 'ok';
   return '';
 }
 
 export function statusText(f) {
-  return f.status === 'RET' && f.delayMin > 0 ? `Delayed ${delay(f.delayMin)}` : f.statusLabel;
+  if ((f.status === 'RET' || f.doubtful) && f.delayMin > 0) return `Delayed ${delay(f.delayMin)}${f.doubtful ? ' *' : ''}`;
+  return f.statusLabel;
 }
 
 // farEnd is the other airport's name: in English when the server knew the code, else AENA's

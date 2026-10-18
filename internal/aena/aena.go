@@ -83,6 +83,8 @@ type Flight struct {
 	Status        string `json:"status"`
 	StatusLabel   string `json:"statusLabel"`
 	Final         bool   `json:"final"`
+	// Doubtful marks a status AENA gave that its own times contradict.
+	Doubtful bool `json:"doubtful,omitempty"`
 	Terminal      string `json:"terminal,omitempty"`
 	Gate          string `json:"gate,omitempty"`
 	Counters      string `json:"counters,omitempty"`
@@ -449,7 +451,14 @@ func toFlight(r raw, dir Direction, zone *time.Location, now time.Time) Flight {
 	if estDate == "" {
 		estDate = f.Date
 	}
-	if est := hhmm(r.Estimated); est != "" {
+	est := hhmm(r.Estimated)
+	// AENA moves the estimated date to today on yesterday's evening flights while keeping the
+	// scheduled time (FR6985, 17/10 20:35, "estimated" 18/10 20:35). An exact 24-hour delay is
+	// not a thing, so the same time on another day means unchanged.
+	if est == f.Scheduled && estDate != f.Date {
+		estDate = f.Date
+	}
+	if est != "" {
 		if e, ok := parse(estDate, est, zone); ok && okS {
 			f.DelayMin = int(e.Sub(sched).Minutes())
 			expected = e
@@ -462,10 +471,15 @@ func toFlight(r raw, dir Direction, zone *time.Location, now time.Time) Flight {
 		}
 	}
 	// AENA sometimes marks a flight finished hours before its new time (FR3070 on 18/10/2026:
-	// BOR at 10:35 for a 14:20 departure). Trusting it would hide the flight and stop the watch.
+	// BOR at 10:35 for a 14:20 departure). Trusting it would hide the flight and stop the watch, so
+	// the time wins, and Doubtful lets the page say AENA claims otherwise.
 	if f.Status == "BOR" && okS && expected.Sub(now) > 15*time.Minute {
 		f.Final = false
-		f.StatusLabel = "Unconfirmed"
+		f.Doubtful = true
+		f.StatusLabel = "On time *"
+		if f.DelayMin >= 15 {
+			f.StatusLabel = "Delayed *"
+		}
 	}
 	return f
 }

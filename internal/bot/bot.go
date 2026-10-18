@@ -45,7 +45,9 @@ const help = `Torre shows departures and arrivals for every AENA airport in Spai
 
 Tap <b>Open</b> to see a board, follow a flight, or add your boarding pass. The pass is read on your phone: your name and booking reference never leave it.
 
-/flights lists what you follow.`
+/flights lists what you follow.
+
+Torre is open source: https://github.com/PlatanosVerdes/torre`
 
 func (b *Bot) Run(ctx context.Context) {
 	b.perChat = limit.New(20, 10)

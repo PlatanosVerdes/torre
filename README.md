@@ -55,7 +55,9 @@ and the page says it is showing close matches.
   `IB0404`; both go through `aena.Canonical` (`FR2495`, `IB404`) before they are compared.
 - **"Departed" before its time is not trusted.** AENA sometimes marks a departure `BOR` hours before
   its new time (FR3070 on 18/10/2026: departed at 10:35, leaving at 14:20). Taken at face value that
-  hides the flight and stops the watch, so it shows as "Unconfirmed" until the time passes.
+  hides the flight and stops the watch, so the time wins: it shows as "Delayed \*" (or "On time \*"),
+  and the flight sheet says AENA lists it as departed, with a link to look the flight up elsewhere.
+  No airline publishes a status API that could settle it, so the page does not pretend to.
 
 ### Status codes
 

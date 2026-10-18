@@ -1,8 +1,14 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="112" fill="#111827"/>
-  <path d="M206 420h100l-14-170h-72z" fill="#e5e7eb"/>
-  <path d="M168 170h176l-22 80H190z" fill="#60a5fa"/>
-  <rect x="196" y="140" width="120" height="30" rx="8" fill="#e5e7eb"/>
-  <rect x="244" y="92" width="24" height="48" rx="6" fill="#e5e7eb"/>
-  <circle cx="256" cy="84" r="16" fill="#fb923c"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 640">
+  <rect width="640" height="640" rx="140" fill="#111827"/>
+  <g transform="rotate(-12 320 320)">
+    <path d="M170 220h300a14 14 0 0 1 14 14v52a34 34 0 0 0 0 68v52a14 14 0 0 1-14 14H170a14 14 0 0 1-14-14v-52a34 34 0 0 0 0-68v-52a14 14 0 0 1 14-14z" fill="#e5e7eb"/>
+    <line x1="404" y1="240" x2="404" y2="400" stroke="#9ca3af" stroke-width="6" stroke-dasharray="12 10" stroke-linecap="round"/>
+    <g transform="translate(282 320) rotate(90)" fill="#2563eb">
+      <rect x="-9" y="-62" width="18" height="124" rx="9"/>
+      <path d="M-9 -12L-66 18V32L-9 16Z"/>
+      <path d="M9 -12L66 18V32L9 16Z"/>
+      <path d="M-6 44L-28 58V66L-6 60Z"/>
+      <path d="M6 44L28 58V66L6 60Z"/>
+    </g>
+  </g>
 </svg>

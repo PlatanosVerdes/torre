@@ -70,7 +70,7 @@ func TestFinishedBeforeItsTimeIsNotTrusted(t *testing.T) {
 	if f.Final {
 		t.Error("a flight four hours from its new time was taken as finished")
 	}
-	if f.StatusLabel != "Unconfirmed" {
+	if f.StatusLabel != "Delayed *" || !f.Doubtful {
 		t.Errorf("label %q", f.StatusLabel)
 	}
 
@@ -200,5 +200,14 @@ func TestFarEndInEnglish(t *testing.T) {
 	r.Other, r.OtherCity = "ZZZ", "SITIO RARO"
 	if f := Normalize([]raw{r}, Departures, madrid, at("18/10/2026 10:00"))[0]; f.OtherCity != "SITIO RARO" {
 		t.Errorf("an unknown code lost AENA's name: %q", f.OtherCity)
+	}
+}
+
+func TestSameTimeOnAnotherDayIsUnchanged(t *testing.T) {
+	r := row("6985", "FR", "FR,RYR,,FR,RYR,RYR", "20:35", "20:35", "BOR")
+	r.Date, r.EstimatedDate = "17/10/2026", "18/10/2026"
+	f := Normalize([]raw{r}, Departures, madrid, at("18/10/2026 13:30"))[0]
+	if f.DelayMin != 0 || f.Estimated != "" || f.Doubtful || !f.Final {
+		t.Errorf("yesterday's departed flight read as %+v", f)
 	}
 }

@@ -54,7 +54,8 @@ export class TorreApp extends LitElement {
       padding: calc(env(safe-area-inset-top) + 10px) 16px 8px; border-bottom: 1px solid var(--line);
     }
     .top { display: flex; gap: 8px; align-items: center; justify-content: space-between; margin-bottom: 8px; }
-    h1 { font-size: 20px; margin: 0; letter-spacing: -0.02em; }
+    h1 { font-size: 20px; margin: 0; letter-spacing: -0.02em; display: flex; align-items: center; gap: 8px; }
+    h1 img { border-radius: 7px; }
     .route { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 8px; align-items: center; }
     .route airport-picker:nth-of-type(1) { grid-row: 1; grid-column: 1; }
     .route airport-picker:nth-of-type(2) { grid-row: 2; grid-column: 1; }
@@ -349,7 +350,7 @@ export class TorreApp extends LitElement {
     return html`
       <header>
         <div class="top">
-          <h1>Torre</h1>
+          <h1><img src="icon.svg" alt="" width="28" height="28">Torre</h1>
           <button class="tool" @click=${() => this.renderRoot.querySelector('input[type=file]').click()}>Add boarding pass</button>
           <input type="file" accept="image/*,.pkpass,application/vnd.apple.pkpass" @change=${this.#onFile}>
         </div>

@@ -35,10 +35,17 @@ func (b *Bot) Enabled() bool { return b != nil && b.Token != "" }
 var ErrBlocked = errors.New("the user has not started the bot")
 
 // Keys are the buttons under a message: Open opens that URL as a Mini App (private chats only),
-// Stop is the callback data of a "Stop following" button.
+// Stop is the callback data of a "Stop following" button, and Choices a row of other callback buttons.
 type Keys struct {
-	Open string
-	Stop string
+	Open    string
+	Stop    string
+	Choices []Choice
+}
+
+// Choice is a callback button. Telegram caps Data at 64 bytes.
+type Choice struct {
+	Text string
+	Data string
 }
 
 func (k Keys) markup() string {
@@ -49,10 +56,21 @@ func (k Keys) markup() string {
 	if k.Stop != "" {
 		row = append(row, map[string]any{"text": "Stop following", "callback_data": k.Stop})
 	}
-	if row == nil {
+	var rows [][]map[string]any
+	if row != nil {
+		rows = append(rows, row)
+	}
+	if len(k.Choices) > 0 {
+		var choices []map[string]any
+		for _, c := range k.Choices {
+			choices = append(choices, map[string]any{"text": c.Text, "callback_data": c.Data})
+		}
+		rows = append(rows, choices)
+	}
+	if rows == nil {
 		return ""
 	}
-	raw, _ := json.Marshal(map[string]any{"inline_keyboard": [][]map[string]any{row}})
+	raw, _ := json.Marshal(map[string]any{"inline_keyboard": rows})
 	return string(raw)
 }
 

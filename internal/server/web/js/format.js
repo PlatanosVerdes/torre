@@ -51,3 +51,29 @@ export function statusText(f) {
 export function place(f) {
   return title(f.otherCity || f.other) + (f.other ? ` (${f.other})` : '');
 }
+
+// close is true when word is a typo away from the start of token: one edit for short words, two
+// for long ones, a swap of neighbours counting as one ("rayan" finds "ryanair", "barclona" finds
+// "barcelona"). Only used when nothing matches exactly, so it never adds noise to a good search.
+export function close(word, token) {
+  if (word.length < 4) return false;
+  const max = word.length >= 7 ? 2 : 1;
+  for (let len = word.length - max; len <= word.length + max; len++) {
+    if (len > 0 && len <= token.length && distance(word, token.slice(0, len)) <= max) return true;
+  }
+  return false;
+}
+
+// distance is the optimal string alignment distance: edits, with adjacent swaps counted once.
+function distance(a, b) {
+  const d = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
+  for (let j = 1; j <= b.length; j++) d[0][j] = j;
+  for (let i = 1; i <= a.length; i++) {
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + cost);
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1);
+    }
+  }
+  return d[a.length][b.length];
+}

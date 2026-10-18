@@ -1,7 +1,7 @@
 import { LitElement, html, css } from '../../vendor/lit-3.3.3.js';
 import { repeat } from '../../vendor/lit-3.3.3.js';
 import { shared } from '../styles.js';
-import { dayLabel, madridDate, norm } from '../format.js';
+import { close, dayLabel, madridDate, norm } from '../format.js';
 import { BoardingPass } from '../boarding-pass.js';
 import './flight-row.js';
 import './torre-sheet.js';
@@ -173,16 +173,21 @@ export class TorreApp extends LitElement {
 
   #days() { return [...new Set(this.flights.map(f => f.date))]; }
 
+  // visible is the board filtered by day and search. When the search matches nothing exactly it
+  // retries tolerating typos, and fuzzy says so, so the page can tell the user.
   #visible() {
     const compact = norm(this.query).replace(/\s+/g, '');
     const words = norm(this.query).split(/\s+/).filter(Boolean);
-    return this.flights.filter(f => {
-      if (this.day && f.date !== this.day) return false;
-      if (!this.showDeparted && !compact && f.final) return false;
-      if (!words.length) return true;
-      const hay = norm([f.number, ...(f.codeshare || []), f.airline, f.otherCity, f.other].join(' '));
-      return hay.replace(/\s+/g, '').includes(compact) || words.every(w => hay.includes(w));
-    });
+    const inDay = this.flights.filter(f => (!this.day || f.date === this.day) && (this.showDeparted || compact || !f.final));
+    if (!words.length) return { flights: inDay, fuzzy: false };
+
+    const hay = (f) => norm([f.number, ...(f.codeshare || []), f.airline, f.otherCity, f.other].join(' '));
+    const exact = inDay.filter(f => { const h = hay(f); return h.replace(/\s+/g, '').includes(compact) || words.every(w => h.includes(w)); });
+    if (exact.length) return { flights: exact, fuzzy: false };
+
+    const tokens = (f) => hay(f).split(/[\s\-/()]+/).filter(Boolean);
+    const near = inDay.filter(f => { const t = tokens(f); return words.every(w => t.some(x => x.includes(w) || close(w, x))); });
+    return { flights: near, fuzzy: near.length > 0 };
   }
 
   #saveUrl() {
@@ -273,7 +278,7 @@ export class TorreApp extends LitElement {
   // --- Rendering ------------------------------------------------------------------------------
 
   render() {
-    const visible = this.#visible();
+    const { flights: visible, fuzzy } = this.#visible();
     return html`
       <header>
         <div class="row">
@@ -295,6 +300,7 @@ export class TorreApp extends LitElement {
         </div>
       </header>
       <div class="meta"><span>${this.#updatedText()}</span><span>${this.flights.length ? `${visible.length} flights` : ''}</span></div>
+      ${fuzzy ? html`<div class="meta">No exact match for “${this.query}”, showing close ones</div>` : ''}
       <main>
         ${this.tracked.length ? html`<h2>Following</h2><div class="list">${this.tracked.map(t => this.#trackedRow(t))}</div>` : ''}
         <h2>${this.dir === 'S' ? 'Departures' : 'Arrivals'} · ${this.airport}</h2>

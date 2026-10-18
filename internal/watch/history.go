@@ -9,8 +9,8 @@ import (
 	"github.com/PlatanosVerdes/torre/internal/aena"
 )
 
-// Seen is one status a followed flight reached and when torre saw it. AENA drops a flight soon
-// after it is done, so these lines are the only record of how long a route really takes.
+// Seen is one state a flight reached and when torre saw it. AENA drops a flight soon after it is
+// done, so these lines are the only record of how long a route really takes.
 type Seen struct {
 	Number    string         `json:"number"`
 	Date      string         `json:"date"`
@@ -21,37 +21,39 @@ type Seen struct {
 	Status    string         `json:"status"`
 	Scheduled time.Time      `json:"scheduled"`
 	Expected  time.Time      `json:"expected"`
+	Gate      string         `json:"gate,omitempty"`
+	Belt      string         `json:"belt,omitempty"`
 	At        time.Time      `json:"at"`
 }
 
-// History appends a Seen line to a JSON Lines file each time a followed flight changes status.
-// It holds no chat, only what AENA's public board says.
+// History appends a Seen line to a JSON Lines file each time a flight's status, expected time,
+// gate or belt changes. It holds no chat, only what AENA's public board says.
 type History struct {
 	path string
 
 	mu   sync.Mutex
-	last map[string]string
+	last map[string]remembered
 }
 
-// maxRemembered bounds the statuses kept to skip repeats; forgetting them only repeats a line.
+type remembered struct {
+	state string
+	day   time.Time
+}
+
+// maxRemembered bounds the states kept to skip repeats; past it, flights over two days old go.
 const maxRemembered = 20000
+
+func NewHistory(path string) *History {
+	return &History{path: path, last: map[string]remembered{}}
+}
 
 func (h *History) Record(f aena.Flight, zone *time.Location, now time.Time) error {
 	if h == nil {
 		return nil
 	}
-	key := f.Airport + "|" + string(f.Direction) + "|" + f.ID
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	if h.last[key] == f.Status {
-		return nil
-	}
-	if len(h.last) >= maxRemembered {
-		h.last = map[string]string{}
-	}
 	s := Seen{
 		Number: f.Number, Date: f.Date, Airport: f.Airport, Direction: f.Direction, Other: f.Other,
-		Airline: f.Airline, Status: f.Status, At: now,
+		Airline: f.Airline, Status: f.Status, Gate: f.Gate, Belt: f.Belt, At: now,
 	}
 	s.Scheduled, _ = time.ParseInLocation("02/01/2006 15:04", f.Date+" "+f.Scheduled, zone)
 	s.Expected = s.Scheduled
@@ -61,6 +63,21 @@ func (h *History) Record(f aena.Flight, zone *time.Location, now time.Time) erro
 			date = f.EstimatedDate
 		}
 		s.Expected, _ = time.ParseInLocation("02/01/2006 15:04", date+" "+f.Estimated, zone)
+	}
+	key := f.Airport + "|" + string(f.Direction) + "|" + f.ID
+	state := s.Status + "|" + s.Expected.Format(time.RFC3339) + "|" + s.Gate + "|" + s.Belt
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.last[key].state == state {
+		return nil
+	}
+	if len(h.last) >= maxRemembered {
+		for k, r := range h.last {
+			if now.Sub(r.day) > 48*time.Hour {
+				delete(h.last, k)
+			}
+		}
 	}
 	line, err := json.Marshal(s)
 	if err != nil {
@@ -74,6 +91,6 @@ func (h *History) Record(f aena.Flight, zone *time.Location, now time.Time) erro
 		file.Close()
 		return err
 	}
-	h.last[key] = f.Status
+	h.last[key] = remembered{state, s.Scheduled}
 	return file.Close()
 }

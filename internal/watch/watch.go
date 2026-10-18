@@ -102,7 +102,7 @@ func New(dataDir string, boards Boards, notify Notifier, zone *time.Location, lo
 		zone:     zone,
 		MaxChat:  10,
 		MaxTotal: 5000,
-		history:  &History{path: filepath.Join(dataDir, "history.jsonl"), last: map[string]string{}},
+		history:  NewHistory(filepath.Join(dataDir, "history.jsonl")),
 	}
 	raw, err := os.ReadFile(w.path)
 	if errors.Is(err, os.ErrNotExist) {

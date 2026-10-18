@@ -37,6 +37,8 @@ type Tracked struct {
 	Pending *aena.Flight `json:"pending,omitempty"`
 	Since   *time.Time   `json:"since,omitempty"`
 	FinalAt *time.Time   `json:"finalAt,omitempty"`
+	// AwaitTakeoff holds a departed flight's arrival news until the destination sees it airborne.
+	AwaitTakeoff bool `json:"awaitTakeoff,omitempty"`
 }
 
 // StopData is the callback data of a message's "Stop following" button. The chat is left out:
@@ -87,6 +89,7 @@ type Watcher struct {
 
 	mu      sync.Mutex
 	tracked []Tracked
+	history *History
 }
 
 func New(dataDir string, boards Boards, notify Notifier, zone *time.Location, log *slog.Logger) (*Watcher, error) {
@@ -99,6 +102,7 @@ func New(dataDir string, boards Boards, notify Notifier, zone *time.Location, lo
 		zone:     zone,
 		MaxChat:  10,
 		MaxTotal: 5000,
+		history:  &History{path: filepath.Join(dataDir, "history.jsonl"), last: map[string]string{}},
 	}
 	raw, err := os.ReadFile(w.path)
 	if errors.Is(err, os.ErrNotExist) {
@@ -251,6 +255,8 @@ func (w *Watcher) Check(ctx context.Context) {
 			continue
 		}
 
+		w.record(*f, now)
+
 		if next, msg := w.landing(ctx, t, f); next != nil {
 			if err := w.notify.Send(ctx, t.Chat, msg, w.keys(*next)); err != nil {
 				if errors.Is(err, telegram.ErrBlocked) {
@@ -264,6 +270,12 @@ func (w *Watcher) Check(ctx context.Context) {
 			continue
 		}
 
+		if t.AwaitTakeoff && grounded[f.Status] {
+			t.Last = f
+			dirty = w.store(t) || dirty
+			continue
+		}
+
 		told := t.Notified
 		if told == nil {
 			told = t.Last
@@ -273,7 +285,8 @@ func (w *Watcher) Check(ctx context.Context) {
 			msg = "Now on AENA's board: " + Describe(Tracked{Number: f.Number, Last: f})
 		} else if changes := Diff(*told, *f); len(changes) == 0 {
 			t.Pending, t.Since = nil, nil // back to what they were told, or nothing worth telling
-		} else if w.urgent(*told, *f, now) || w.settled(&t, *f, now) {
+			t.AwaitTakeoff = false
+		} else if t.AwaitTakeoff || w.urgent(*told, *f, now) || w.settled(&t, *f, now) {
 			msg = Headline(*f) + "\n" + strings.Join(changes, "\n")
 		}
 		if msg != "" {
@@ -290,6 +303,7 @@ func (w *Watcher) Check(ctx context.Context) {
 			}
 			t.Notified = f
 			t.Pending, t.Since = nil, nil
+			t.AwaitTakeoff = false
 		}
 
 		t.Last = f
@@ -369,6 +383,10 @@ func (w *Watcher) store(t Tracked) bool {
 	return false
 }
 
+// grounded are the arrival states a destination keeps until it sees the flight take off. Its time
+// is then a guess from the schedule (VY3919, 18/10: BCN said 00:05 until takeoff, then 01:08).
+var grounded = map[string]bool{"": true, "SCH": true, "INI": true, "HOR": true, "RET": true}
+
 // landing moves a departed flight's watch to its arrival when AENA also runs the destination,
 // and returns the message that says so. It returns nil when there is nothing to move to.
 func (w *Watcher) landing(ctx context.Context, t Tracked, f *aena.Flight) (*Tracked, string) {
@@ -391,15 +409,31 @@ func (w *Watcher) landing(ctx context.Context, t Tracked, f *aena.Flight) (*Trac
 	if arr == nil {
 		return nil, ""
 	}
+	w.record(*arr, w.now())
 	next := t
 	next.Airport, next.Direction, next.Date = arr.Airport, aena.Arrivals, arr.Date
 	next.Last, next.Notified, next.FinalAt = arr, arr, nil
-	msg := fmt.Sprintf("%s\nStatus: <b>Departed</b>\nArrives at %s <b>%s</b>", Headline(*f), esc(arr.Airport), Time(*arr))
-	if arr.DelayMin != 0 {
-		msg += fmt.Sprintf(" (%+d min)", arr.DelayMin)
+	msg := fmt.Sprintf("%s\nStatus: <b>Departed</b>\n", Headline(*f))
+	if grounded[arr.Status] {
+		// Measured from the schedule, so the time line that follows takeoff reads against it.
+		told := *arr
+		told.Estimated, told.EstimatedDate, told.DelayMin = "", "", 0
+		next.Notified, next.AwaitTakeoff = &told, true
+		msg += fmt.Sprintf("%s has not seen it take off yet; its arrival time will follow when it does.", esc(arr.Airport))
+	} else {
+		msg += fmt.Sprintf("Arrives at %s <b>%s</b>", esc(arr.Airport), Time(*arr))
+		if arr.DelayMin != 0 {
+			msg += fmt.Sprintf(" (%+d min)", arr.DelayMin)
+		}
 	}
 	msg += "\nYou will hear about the landing and the baggage belt."
 	return &next, msg
+}
+
+func (w *Watcher) record(f aena.Flight, now time.Time) {
+	if err := w.history.Record(f, w.zone, now); err != nil {
+		w.log.Warn("history not written", "flight", f.ID, "err", err)
+	}
 }
 
 func (w *Watcher) keys(t Tracked) telegram.Keys {

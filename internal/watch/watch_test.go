@@ -2,8 +2,10 @@ package watch
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"log/slog"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -474,5 +476,84 @@ func TestAChangeThatMovesAgainWaitsAgain(t *testing.T) {
 	w.Check(context.Background())
 	if len(n.msgs) != 2 || !strings.Contains(n.msgs[1].text, "<b>13:05</b>") {
 		t.Fatalf("want the delay that held, 13:05: %+v", n.msgs)
+	}
+}
+
+// VY3919, 18/10: BCN kept its pre-takeoff 00:05 after PMI said departed, and 01:08 came with FLY.
+func TestArrivalTimeWaitsForTheDestinationToSeeTakeoff(t *testing.T) {
+	arrival := aena.Flight{
+		ID: "18/10/2026-FR2495", Number: "FR2495", Direction: aena.Arrivals, Airport: "PMI", Other: "BCN",
+		Date: "18/10/2026", Scheduled: "13:25", Estimated: "14:05", DelayMin: 40, Status: "RET", StatusLabel: "Delayed",
+	}
+	b := &twoBoards{dep: []aena.Flight{flight()}, arr: []aena.Flight{arrival}}
+	n := &inbox{}
+	w := newWatcher(t, (*fakeBoards)(nil), n, morning)
+	w.boards = b
+	w.Spanish = func(code string) bool { return code == "PMI" || code == "BCN" }
+	if _, err := w.Add(context.Background(), "1", "BCN", aena.Departures, "18/10/2026", "FR2495"); err != nil {
+		t.Fatal(err)
+	}
+
+	gone := flight()
+	gone.Status, gone.StatusLabel, gone.Final = "BOR", "Departed", true
+	b.dep = []aena.Flight{gone}
+	w.Check(context.Background())
+	if len(n.msgs) != 2 || strings.Contains(n.msgs[1].text, "14:05") || !strings.Contains(n.msgs[1].text, "PMI has not seen it take off yet") {
+		t.Fatalf("the destination's pre-takeoff time was sent: %+v", n.msgs)
+	}
+
+	later(w, 20*time.Minute)
+	moved := arrival
+	moved.Estimated, moved.DelayMin = "14:15", 50
+	b.arr = []aena.Flight{moved}
+	w.Check(context.Background())
+	if len(n.msgs) != 2 {
+		t.Fatalf("a time from before takeoff was sent: %s", n.msgs[len(n.msgs)-1].text)
+	}
+
+	flying := arrival
+	flying.Estimated, flying.DelayMin, flying.Status, flying.StatusLabel = "15:08", 103, "FLY", "In flight"
+	b.arr = []aena.Flight{flying}
+	w.Check(context.Background())
+	if len(n.msgs) != 3 || !strings.Contains(n.msgs[2].text, "Time: 13:25 → <b>15:08</b> (+103 min)") {
+		t.Fatalf("takeoff did not send the arrival time at once: %+v", n.msgs)
+	}
+	if w.List("1")[0].AwaitTakeoff {
+		t.Error("still waiting for takeoff after it was sent")
+	}
+}
+
+func TestHistoryKeepsEachStatusOnce(t *testing.T) {
+	b := &fakeBoards{flights: []aena.Flight{flight()}}
+	w := newWatcher(t, b, &inbox{}, morning)
+	for _, chat := range []string{"1", "2"} {
+		if _, err := w.Add(context.Background(), chat, "BCN", aena.Departures, "18/10/2026", "FR2495"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	w.Check(context.Background())
+	gone := flight()
+	gone.Status, gone.Estimated, gone.DelayMin = "BOR", "12:41", 21
+	b.flights = []aena.Flight{gone}
+	w.Check(context.Background())
+	w.Check(context.Background())
+
+	raw, err := os.ReadFile(w.history.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("want one line per status, got %d:\n%s", len(lines), raw)
+	}
+	var s Seen
+	if err := json.Unmarshal([]byte(lines[1]), &s); err != nil {
+		t.Fatal(err)
+	}
+	if s.Status != "BOR" || s.Other != "PMI" || s.Expected.Sub(s.Scheduled) != 21*time.Minute || !s.At.Equal(morning) {
+		t.Errorf("wrong line: %+v", s)
+	}
+	if strings.Contains(string(raw), `"1"`) {
+		t.Error("a chat id reached the history")
 	}
 }

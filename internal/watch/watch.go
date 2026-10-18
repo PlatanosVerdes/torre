@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"sync"
@@ -32,7 +33,10 @@ type Tracked struct {
 	// Notified is the state the chat was last told about. Changes are measured from it, not from
 	// Last, so a time creeping a minute per check still adds up to a message.
 	Notified *aena.Flight `json:"notified,omitempty"`
-	FinalAt  *time.Time   `json:"finalAt,omitempty"`
+	// Pending is a change not sent yet, held until it has stood for settle; Since is when it began.
+	Pending *aena.Flight `json:"pending,omitempty"`
+	Since   *time.Time   `json:"since,omitempty"`
+	FinalAt *time.Time   `json:"finalAt,omitempty"`
 }
 
 // StopData is the callback data of a message's "Stop following" button. The chat is left out:
@@ -218,8 +222,19 @@ func (w *Watcher) Run(ctx context.Context, every time.Duration) {
 	}
 }
 
-// Check compares every tracked flight with the board and notifies each change.
+// Check compares every tracked flight with the board and notifies each change that holds, or at
+// once when it cannot wait. The file is written once per pass, and only when something changed.
 func (w *Watcher) Check(ctx context.Context) {
+	dirty := false
+	defer func() {
+		if dirty {
+			w.mu.Lock()
+			defer w.mu.Unlock()
+			if err := w.saveLocked(); err != nil {
+				w.log.Warn("save failed", "err", err)
+			}
+		}
+	}()
 	for _, t := range w.List("") {
 		f, err := w.find(ctx, t.Airport, t.Direction, t.Date, t.Number)
 		if err != nil {
@@ -256,7 +271,9 @@ func (w *Watcher) Check(ctx context.Context) {
 		var msg string
 		if told == nil {
 			msg = "Now on AENA's board: " + Describe(Tracked{Number: f.Number, Last: f})
-		} else if changes := Diff(*told, *f); len(changes) > 0 {
+		} else if changes := Diff(*told, *f); len(changes) == 0 {
+			t.Pending, t.Since = nil, nil // back to what they were told, or nothing worth telling
+		} else if w.urgent(*told, *f, now) || w.settled(&t, *f, now) {
 			msg = Headline(*f) + "\n" + strings.Join(changes, "\n")
 		}
 		if msg != "" {
@@ -272,6 +289,7 @@ func (w *Watcher) Check(ctx context.Context) {
 				continue
 			}
 			t.Notified = f
+			t.Pending, t.Since = nil, nil
 		}
 
 		t.Last = f
@@ -282,8 +300,73 @@ func (w *Watcher) Check(ctx context.Context) {
 			_ = w.Remove("", t.ID)
 			continue
 		}
-		w.update(t)
+		dirty = w.store(t) || dirty
 	}
+}
+
+// settle is how long a change must stand before it is worth a message: AENA takes a gate away
+// and gives it back within minutes (VY3919: D84, none, D84 between 21:50 and 22:10).
+const settle = 10 * time.Minute
+
+// gateRush is how close to departure a new gate goes out at once: there is a walk to make.
+const gateRush = time.Hour
+
+// urgentStatus are the states a traveller acts on as soon as they appear.
+var urgentStatus = map[string]bool{"EMB": true, "ULL": true, "CER": true, "BOR": true, "CAN": true, "DES": true, "DIV": true, "LND": true, "IBK": true}
+
+func (w *Watcher) urgent(told, cur aena.Flight, now time.Time) bool {
+	if cur.Status != told.Status && urgentStatus[cur.Status] {
+		return true
+	}
+	if cur.Belt != told.Belt && cur.Belt != "" {
+		return true
+	}
+	if cur.Direction == aena.Departures && cur.Gate != "" && cur.Gate != told.Gate {
+		if at, ok := w.expected(cur); ok && at.Sub(now) < gateRush {
+			return true
+		}
+	}
+	return false
+}
+
+// settled holds a change as pending and reports when it has stood for settle. A change that moves
+// again by something worth telling starts the wait over.
+func (w *Watcher) settled(t *Tracked, cur aena.Flight, now time.Time) bool {
+	if t.Pending == nil || len(Diff(*t.Pending, cur)) > 0 {
+		f := cur
+		t.Pending, t.Since = &f, &now
+		return false
+	}
+	return now.Sub(*t.Since) >= settle
+}
+
+// expected is when the flight is due now, in the airport's zone.
+func (w *Watcher) expected(f aena.Flight) (time.Time, bool) {
+	date, clock := f.Date, f.Scheduled
+	if f.Estimated != "" {
+		clock = f.Estimated
+	}
+	if f.EstimatedDate != "" {
+		date = f.EstimatedDate
+	}
+	at, err := time.ParseInLocation("02/01/2006 15:04", date+" "+clock, w.zone)
+	return at, err == nil
+}
+
+// store puts t in the list without writing the file, and reports whether it changed.
+func (w *Watcher) store(t Tracked) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	for i := range w.tracked {
+		if w.tracked[i].ID == t.ID {
+			if reflect.DeepEqual(w.tracked[i], t) {
+				return false
+			}
+			w.tracked[i] = t
+			return true
+		}
+	}
+	return false
 }
 
 // landing moves a departed flight's watch to its arrival when AENA also runs the destination,
@@ -404,8 +487,8 @@ func (w *Watcher) saveLocked() error {
 }
 
 // minTimeChange is the smallest move of the expected time worth a message. AENA's estimates
-// wobble by a minute (FR3070: 15:06, 15:07, 15:06 within six minutes).
-const minTimeChange = 5
+// wobble (FR3070: 15:06, 15:07, 15:06 within six minutes), and a few minutes change no plan.
+const minTimeChange = 10
 
 // Diff lists what a traveller would want to hear about, in the order they would act on it.
 func Diff(old, cur aena.Flight) []string {
@@ -420,7 +503,8 @@ func Diff(old, cur aena.Flight) []string {
 		}
 		out = append(out, line)
 	}
-	if old.Gate != cur.Gate {
+	// A gate taken away tells nobody where to go: wait for the next one.
+	if old.Gate != cur.Gate && cur.Gate != "" {
 		out = append(out, fmt.Sprintf("Gate: %s → <b>%s</b>", dash(old.Gate), dash(cur.Gate)))
 	}
 	if old.Terminal != cur.Terminal {

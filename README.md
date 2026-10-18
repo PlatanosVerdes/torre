@@ -96,11 +96,19 @@ An unknown code is shown as the raw code rather than hidden.
 ## Following a flight
 
 Tap a flight, then "Follow". The service checks the board every `TORRE_CHECK_EVERY` and sends one
-message per change: status, time with the delay, gate, terminal, belt, check-in desks. The time is
-only news once it moves five minutes from what the chat was last told: AENA's estimates wobble by a
-minute, and a time creeping a minute per check still adds up to a message. It sends the
-current state when you start, so you know the chat is wired, and every message has an "Open in
-Torre" button that opens the flight inside Telegram.
+message per change: status, time with the delay, gate, terminal, belt, check-in desks.
+
+A change is sent once it has stood for ten minutes. AENA's board flickers: a gate given, taken away
+and given back within minutes, a delay revised twice in a quarter of an hour. Held for ten minutes,
+the flicker sends nothing and the final value sends one message. What cannot wait goes at once:
+boarding, final call, gate closed, departed, cancelled, diverted, landed, baggage on the belt, a
+belt assigned, and a new gate within an hour of departure, when there is a walk to make. A gate taken
+away is never sent on its own, since it tells nobody where to go. The time is only news once it
+moves ten minutes from what the chat was last told, so a time creeping a minute per check still adds
+up to a message.
+
+It sends the current state when you start, so you know the chat is wired, and every message has an
+"Open in Torre" button that opens the flight inside Telegram.
 
 When a followed departure leaves for another AENA airport, the watch moves to that airport's arrivals
 board, says so in one message ("Departed, arrives at PMI 13:47") and carries on with the landing, the

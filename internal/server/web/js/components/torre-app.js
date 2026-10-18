@@ -1,7 +1,7 @@
 import { LitElement, html, css } from '../../vendor/lit-3.3.3.js';
 import { repeat } from '../../vendor/lit-3.3.3.js';
 import { shared } from '../styles.js';
-import { close, dayLabel, madridDate, norm } from '../format.js';
+import { canonical, close, dayLabel, isFlightNumber, madridDate, norm } from '../format.js';
 import { BoardingPass } from '../boarding-pass.js';
 import './flight-row.js';
 import './torre-sheet.js';
@@ -42,6 +42,7 @@ export class TorreApp extends LitElement {
     notify: { state: true },
     bot: { state: true },
     sheet: { state: true },
+    other: { state: true },
     busy: { state: true },
     message: { state: true },
     now: { state: true },
@@ -129,6 +130,7 @@ export class TorreApp extends LitElement {
     this.tracked = [];
     this.canFollow = false;
     this.sheet = null;
+    this.other = null;
     this.now = Date.now();
     this.loading = 0;
   }
@@ -163,6 +165,7 @@ export class TorreApp extends LitElement {
   #setRoute(from, to) {
     this.from = from;
     this.to = to;
+    this.other = null;
     this.#saveUrl();
     const r = this.#route();
     if (!r) { this.flights = []; this.loaded = ''; return; }
@@ -210,6 +213,7 @@ export class TorreApp extends LitElement {
       this.updatedAt = data.updated;
       this.error = '';
       this.#pickDay();
+      if (this.query) this.#lookElsewhere();
       if (this.pendingOpen) {
         const wanted = this.pendingOpen;
         this.pendingOpen = '';
@@ -246,14 +250,28 @@ export class TorreApp extends LitElement {
   #visible() {
     const other = this.#route()?.other;
     const compact = norm(this.query).replace(/\s+/g, '');
-    const words = norm(this.query).split(/\s+/).filter(Boolean);
+    // A flight number is looked for on every loaded day: the user knows the flight, not the date.
+    const anyDay = isFlightNumber(this.query);
     const inRoute = this.flights.filter(f =>
       (!other || f.other === other) &&
-      (!this.day || f.date === this.day) &&
+      (anyDay || !this.day || f.date === this.day) &&
       (this.showDeparted || compact || !f.final));
+    return this.#search(inRoute);
+  }
+
+  #search(flights) {
+    const compact = norm(this.query).replace(/\s+/g, '');
+    const words = norm(this.query).split(/\s+/).filter(Boolean);
+    const inRoute = flights;
     if (!words.length) return { flights: inRoute, fuzzy: false };
 
-    const fields = (f) => [f.number, ...(f.codeshare || []), f.airline, f.otherCity, f.otherLocal, f.other].map(norm);
+    // A flight number is that flight or nothing: one digit off is another flight, not a typo.
+    if (isFlightNumber(this.query)) {
+      const want = canonical(this.query);
+      return { flights: inRoute.filter(f => [f.number, ...(f.codeshare || []), ...(f.icao || [])].some(n => canonical(n) === want)), fuzzy: false };
+    }
+
+    const fields = (f) => [f.number, ...(f.codeshare || []), ...(f.icao || []), f.airline, f.otherCity, f.otherLocal, f.other].map(norm);
     const exact = inRoute.filter(f => {
       const h = fields(f).join(' ');
       return h.replace(/\s+/g, '').includes(compact) || words.every(w => h.includes(w));
@@ -375,6 +393,11 @@ export class TorreApp extends LitElement {
         ${this.tracked.length ? html`<h2>Following</h2><div class="list">${this.tracked.map(t => this.#trackedRow(t))}</div>` : ''}
         <h2>${this.#heading(route)}</h2>
         <div class="list" @flight-select=${e => this.#openFlight(e.detail.flight, e.detail.trackId)}>${this.#board(route, visible)}</div>
+        ${this.other && !visible.length ? html`
+          <h2>${this.other.dir === 'S' ? 'Departures' : 'Arrivals'} · ${this.other.airport}</h2>
+          <div class="list" @flight-select=${e => this.#openFlight(e.detail.flight, e.detail.trackId)}>
+            ${this.other.flights.slice(0, 20).map(f => html`<flight-row .flight=${f} withRoute showDay></flight-row>`)}
+          </div>` : ''}
         ${route && !this.full ? html`<button class="more" @click=${this.#loadFull}>Show more days</button>` : ''}
       </main>
       <torre-sheet ?open=${!!this.sheet} @sheet-close=${() => { this.sheet = null; }}>${this.#sheetContent()}</torre-sheet>
@@ -397,9 +420,11 @@ export class TorreApp extends LitElement {
     if (this.error) return html`<div class="error">${this.error}</div>`;
     if (!this.flights.length) return html`<div class="empty">Loading…</div>`;
     if (!visible.length) {
+      if (this.other) return html`<div class="empty">Not on this board. It is on the ${this.other.dir === 'S' ? 'departures' : 'arrivals'} below.</div>`;
       return html`<div class="empty">${this.query ? 'No flight matches' : 'No flights on this route that day'}${this.full ? '' : '. Try “Show more days”.'}</div>`;
     }
-    return repeat(visible.slice(0, MAX_ROWS), f => f.id, f => html`<flight-row .flight=${f}></flight-row>`);
+    const days = isFlightNumber(this.query);
+    return repeat(visible.slice(0, MAX_ROWS), f => f.id, f => html`<flight-row .flight=${f} ?showDay=${days}></flight-row>`);
   }
 
   #trackedRow(t) {
@@ -439,7 +464,27 @@ export class TorreApp extends LitElement {
     // Read now: once dispatch ends, an event from inside a shadow root has no target any more.
     const value = e.target.value;
     clearTimeout(this.searchTimer);
-    this.searchTimer = setTimeout(() => { this.query = value; this.#saveUrl(); }, 120);
+    this.searchTimer = setTimeout(() => { this.query = value; this.#saveUrl(); this.#lookElsewhere(); }, 120);
+  }
+
+  // lookElsewhere covers "I typed a flight number, but it lands here rather than leaves": when a
+  // flight number finds nothing on a one-airport board, the same airport's other board is asked.
+  async #lookElsewhere() {
+    const r = this.#route();
+    const looksLikeFlight = /^[a-z0-9]{2,3}\s*\d{1,5}[a-z]?$/i.test(this.query.trim());
+    if (!r || r.other || !looksLikeFlight || this.#visible().flights.length) {
+      this.other = null;
+      return;
+    }
+    const dir = r.dir === 'S' ? 'L' : 'S';
+    try {
+      const data = await this.api.board(r.airport, dir, false);
+      // Only exact matches: a typo-tolerant hit on another board would be a guess on a guess.
+      const found = this.#search(data.flights);
+      this.other = found.flights.length && !found.fuzzy ? { airport: r.airport, dir, flights: found.flights } : null;
+    } catch {
+      this.other = null;
+    }
   }
 
   #onFile(e) {

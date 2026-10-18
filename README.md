@@ -42,7 +42,13 @@ names the far end of a flight in English ("London Gatwick" where AENA writes "LO
 AENA's own name stays searchable, so "Londres" works too. Places the loaded board actually flies to
 rank first: from Barcelona, "new york" offers JFK and Newark before Stewart.
 
-The flight search below the route works the same way. When nothing matches exactly it retries
+A flight number in the search is matched exactly, never as a typo (FR2494 is another flight), on
+every loaded day, and in either form: IATA (`FR2495`, `IB0404`) or ICAO (`RYR2495`, `IBE404`), which
+is how AENA's app and many airline sites write it. If the board shown does not have it, the same
+airport's other board is searched and shown below: a Barcelona → Palma flight typed while looking at
+Palma's departures turns up in Palma's arrivals.
+
+The flight search for words works the same way as the pickers. When nothing matches exactly it retries
 tolerating a typo or two, and also compares names written as one word ("aireropa" finds Air Europa),
 and the page says it is showing close matches.
 
@@ -87,6 +93,11 @@ only news once it moves five minutes from what the chat was last told: AENA's es
 minute, and a time creeping a minute per check still adds up to a message. It sends the
 current state when you start, so you know the chat is wired, and every message has an "Open in
 Torre" button that opens the flight inside Telegram.
+
+When a followed departure leaves for another AENA airport, the watch moves to that airport's arrivals
+board, says so in one message ("Departed, arrives at PMI 13:47") and carries on with the landing, the
+baggage belt and "Baggage on belt", the way AENA's own app follows a trip. A flight to an airport
+AENA does not run ends at departure.
 
 A flight further out than AENA publishes (about two weeks) is kept as pending and announced when it
 appears. A flight is dropped six hours after it departs, lands or is cancelled, or two days after its

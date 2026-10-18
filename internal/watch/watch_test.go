@@ -304,3 +304,66 @@ func TestStopButton(t *testing.T) {
 		t.Error("the stop data does not lead back to the flight's id")
 	}
 }
+
+// twoBoards answers the departures at BCN and the arrivals at PMI separately.
+type twoBoards struct{ dep, arr []aena.Flight }
+
+func (b *twoBoards) Board(_ context.Context, airport string, dir aena.Direction, _ bool) ([]aena.Flight, time.Time, error) {
+	if dir == aena.Arrivals {
+		return b.arr, time.Now(), nil
+	}
+	return b.dep, time.Now(), nil
+}
+
+func TestTheWatchFollowsTheFlightToItsArrival(t *testing.T) {
+	arrival := aena.Flight{
+		ID: "18/10/2026-FR2495", Number: "FR2495", Direction: aena.Arrivals, Airport: "PMI", Other: "BCN",
+		Date: "18/10/2026", Scheduled: "13:25", Status: "FLY", StatusLabel: "In flight",
+	}
+	b := &twoBoards{dep: []aena.Flight{flight()}, arr: []aena.Flight{arrival}}
+	n := &inbox{}
+	w := newWatcher(t, (*fakeBoards)(nil), n, morning)
+	w.boards = b
+	w.Spanish = func(code string) bool { return code == "PMI" || code == "BCN" }
+	if _, err := w.Add(context.Background(), "1", "BCN", aena.Departures, "18/10/2026", "FR2495"); err != nil {
+		t.Fatal(err)
+	}
+
+	gone := flight()
+	gone.Status, gone.StatusLabel, gone.Final = "BOR", "Departed", true
+	b.dep = []aena.Flight{gone}
+	w.Check(context.Background())
+	if len(n.msgs) != 2 || !strings.Contains(n.msgs[1].text, "Arrives at PMI <b>13:25</b>") {
+		t.Fatalf("no hand-over message: %+v", n.msgs)
+	}
+	tr := w.List("1")[0]
+	if tr.Airport != "PMI" || tr.Direction != aena.Arrivals {
+		t.Fatalf("still watching %s/%s", tr.Airport, tr.Direction)
+	}
+
+	landed := arrival
+	landed.Status, landed.StatusLabel, landed.Belt = "IBK", "Baggage on belt", "08"
+	b.arr = []aena.Flight{landed}
+	w.Check(context.Background())
+	last := n.msgs[len(n.msgs)-1].text
+	if !strings.Contains(last, "Baggage on belt") || !strings.Contains(last, "Baggage belt: <b>08</b>") {
+		t.Errorf("arrival change not sent: %s", last)
+	}
+}
+
+func TestNoArrivalWatchOutsideSpain(t *testing.T) {
+	b := &fakeBoards{flights: []aena.Flight{flight()}}
+	n := &inbox{}
+	w := newWatcher(t, b, n, morning)
+	w.Spanish = func(string) bool { return false }
+	if _, err := w.Add(context.Background(), "1", "BCN", aena.Departures, "18/10/2026", "FR2495"); err != nil {
+		t.Fatal(err)
+	}
+	gone := flight()
+	gone.Status, gone.StatusLabel, gone.Final = "BOR", "Departed", true
+	b.flights = []aena.Flight{gone}
+	w.Check(context.Background())
+	if w.List("1")[0].Direction != aena.Departures || !strings.Contains(n.msgs[1].text, "Departed") {
+		t.Errorf("a flight to a non-AENA airport changed boards: %+v", n.msgs)
+	}
+}

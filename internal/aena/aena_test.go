@@ -211,3 +211,15 @@ func TestSameTimeOnAnotherDayIsUnchanged(t *testing.T) {
 		t.Errorf("yesterday's departed flight read as %+v", f)
 	}
 }
+
+func TestICAONumbers(t *testing.T) {
+	rows := []raw{
+		row("3906", "VY", "VY,VLG,,VY,VLG,VLG", "09:05", "09:40", "BOR"),
+		row("5126", "IB", "IB,IBE,IB,IBE,IBE,IBE", "09:05", "09:40", "BOR"),
+	}
+	rows[0].AirlineICAO, rows[1].AirlineICAO = "VLG", "IBE"
+	f := Normalize(rows, Departures, madrid, at("18/10/2026 12:00"))[0]
+	if len(f.ICAO) != 2 || f.ICAO[0] != "VLG3906" || f.ICAO[1] != "IBE5126" {
+		t.Errorf("icao = %v", f.ICAO)
+	}
+}

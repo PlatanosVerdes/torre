@@ -9,6 +9,7 @@ export class FlightRow extends LitElement {
     flight: { attribute: false },
     trackId: { attribute: false },
     withRoute: { type: Boolean },
+    showDay: { type: Boolean },
   };
 
   static styles = [shared, css`
@@ -46,7 +47,7 @@ export class FlightRow extends LitElement {
           <span class="badge ${tone(f)}">${f.statusLabel}</span>
           <span class="where">${this.#where(f)}</span>
         </div>
-        <div class="sub">${f.number} · ${f.airline}${codes}${this.withRoute ? ` · ${dayLabel(f.date)}` : ''}</div>
+        <div class="sub">${f.number} · ${f.airline}${codes}${this.withRoute || this.showDay ? ` · ${dayLabel(f.date)}` : ''}</div>
       </button>`;
   }
 

@@ -66,6 +66,9 @@ type Flight struct {
 	ID        string    `json:"id"`
 	Number    string    `json:"number"`
 	Codeshare []string  `json:"codeshare,omitempty"`
+	// ICAO holds the same numbers with three-letter airline codes (RYR2495 for FR2495), which is
+	// how AENA's own app and many boarding sites write them.
+	ICAO []string `json:"icao,omitempty"`
 	Airline   string    `json:"airline"`
 	Direction Direction `json:"direction"`
 	Airport   string    `json:"airport"`
@@ -369,9 +372,11 @@ func Normalize(rows []raw, dir Direction, zone *time.Location, now time.Time) []
 		}
 		if operated && !g.operated {
 			f.Codeshare = append(append(f.Codeshare, g.flight.Number), g.flight.Codeshare...)
+			f.ICAO = append(f.ICAO, g.flight.ICAO...)
 			g.flight, g.operated = f, true
 		} else if f.Number != g.flight.Number && !strings.HasSuffix(f.Number, "S") {
 			g.flight.Codeshare = append(g.flight.Codeshare, f.Number)
+			g.flight.ICAO = append(g.flight.ICAO, f.ICAO...)
 		}
 	}
 
@@ -416,6 +421,9 @@ func toFlight(r raw, dir Direction, zone *time.Location, now time.Time) Flight {
 	}
 	if f.Number == clean(r.Number) {
 		f.Number = clean(r.AirlineICAO) + clean(r.Number)
+	}
+	if icao := clean(r.AirlineICAO); icao != "" {
+		f.ICAO = []string{icao + clean(r.Number)}
 	}
 	if g2 := clean(r.Gate2); g2 != "" && g2 != f.Gate {
 		f.Gate += "/" + g2

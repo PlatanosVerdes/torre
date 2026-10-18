@@ -86,3 +86,17 @@ function distance(a, b) {
   }
   return d[a.length][b.length];
 }
+
+// isFlightNumber tells a flight number ("FR2495", "ryr 2495", "IB0404S") from a word search.
+export function isFlightNumber(q) {
+  // The airline part has a letter (FR, U2, 6E, RYR): bare digits stay a substring search.
+  return /^([a-z][a-z0-9]|[0-9][a-z]|[a-z]{3})\s*\d{1,5}[a-z]?$/i.test(String(q).trim());
+}
+
+// canonical writes a flight number one way, like the server's aena.Canonical: no spaces, no
+// padding zeros ("FR 02495" and "FR2495" are the same flight).
+export function canonical(n) {
+  const s = String(n).toUpperCase().replace(/\s+/g, '');
+  const m = /^([A-Z]{3}|[A-Z0-9]{2})0*(\d+)([A-Z]?)$/.exec(s);
+  return m ? m[1] + m[2] + m[3] : s;
+}

@@ -77,6 +77,9 @@ type Watcher struct {
 	StopButton bool
 	MaxChat    int
 	MaxTotal   int
+	// Spanish says whether AENA runs an airport. When it runs a departed flight's destination
+	// too, the watch carries on at that arrivals board: landing, belt, baggage.
+	Spanish func(code string) bool
 
 	mu      sync.Mutex
 	tracked []Tracked
@@ -233,6 +236,19 @@ func (w *Watcher) Check(ctx context.Context) {
 			continue
 		}
 
+		if next, msg := w.landing(ctx, t, f); next != nil {
+			if err := w.notify.Send(ctx, t.Chat, msg, w.keys(*next)); err != nil {
+				if errors.Is(err, telegram.ErrBlocked) {
+					_ = w.Remove("", t.ID)
+				} else {
+					w.log.Warn("notify failed", "flight", t.ID, "err", err)
+				}
+				continue
+			}
+			w.update(*next)
+			continue
+		}
+
 		told := t.Notified
 		if told == nil {
 			told = t.Last
@@ -268,6 +284,39 @@ func (w *Watcher) Check(ctx context.Context) {
 		}
 		w.update(t)
 	}
+}
+
+// landing moves a departed flight's watch to its arrival when AENA also runs the destination,
+// and returns the message that says so. It returns nil when there is nothing to move to.
+func (w *Watcher) landing(ctx context.Context, t Tracked, f *aena.Flight) (*Tracked, string) {
+	if !f.Final || t.Direction != aena.Departures || w.Spanish == nil || !w.Spanish(f.Other) {
+		return nil, ""
+	}
+	flights, _, err := w.boards.Board(ctx, f.Other, aena.Arrivals, true)
+	if err != nil {
+		return nil, ""
+	}
+	// An overnight flight lands on the next day's board.
+	var arr *aena.Flight
+	if day, err := time.ParseInLocation("02/01/2006", f.Date, w.zone); err == nil {
+		for _, d := range []time.Time{day, day.AddDate(0, 0, 1)} {
+			if arr = Find(flights, d.Format("02/01/2006"), f.Number); arr != nil {
+				break
+			}
+		}
+	}
+	if arr == nil {
+		return nil, ""
+	}
+	next := t
+	next.Airport, next.Direction, next.Date = arr.Airport, aena.Arrivals, arr.Date
+	next.Last, next.Notified, next.FinalAt = arr, arr, nil
+	msg := fmt.Sprintf("%s\nStatus: <b>Departed</b>\nArrives at %s <b>%s</b>", Headline(*f), esc(arr.Airport), Time(*arr))
+	if arr.DelayMin != 0 {
+		msg += fmt.Sprintf(" (%+d min)", arr.DelayMin)
+	}
+	msg += "\nYou will hear about the landing and the baggage belt."
+	return &next, msg
 }
 
 func (w *Watcher) keys(t Tracked) telegram.Keys {
@@ -333,7 +382,7 @@ func Find(flights []aena.Flight, date, number string) *aena.Flight {
 		if aena.Canonical(f.Number) == number {
 			return f
 		}
-		for _, c := range f.Codeshare {
+		for _, c := range append(f.Codeshare, f.ICAO...) {
 			if aena.Canonical(c) == number {
 				return f
 			}

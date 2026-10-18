@@ -66,6 +66,18 @@ func run() error {
 		return err
 	}
 	watcher.BaseURL = publicURL
+	watcher.Spanish = func(code string) bool {
+		list, err := client.Airports(context.Background())
+		if err != nil {
+			return false
+		}
+		for _, a := range list {
+			if a.IATA == code {
+				return true
+			}
+		}
+		return false
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

@@ -50,6 +50,7 @@ export class TorreApp extends LitElement {
     bot: { state: true },
     sheet: { state: true },
     other: { state: true },
+    locating: { state: true },
     busy: { state: true },
     message: { state: true },
     now: { state: true },
@@ -207,16 +208,26 @@ export class TorreApp extends LitElement {
 
   // locate asks for the phone's position once, on a first visit, and starts the route at the nearest
   // Spanish airport within 200 km. The position stays on the phone; only the airport is used. A
-  // refusal, an error or being far from Spain leaves the route empty, and it is never asked again.
-  #locate() {
-    if (!this.locating) return;
-    const done = () => { this.locating = false; store.set('located', '1'); this.requestUpdate(); };
-    if (!navigator.geolocation) { done(); return; }
+  // refusal, an error or being far from Spain leaves the route empty, and it is not asked again on
+  // its own; the location button in From asks again whenever tapped.
+  #locate(asked = false) {
+    if (!this.locating && !asked) return;
+    this.locating = true;
+    const done = (message) => {
+      this.locating = false;
+      store.set('located', '1');
+      if (asked && message) this.#toast(message, 5000);
+    };
+    if (!navigator.geolocation) { done('This browser cannot share its location'); return; }
     navigator.geolocation.getCurrentPosition(pos => {
       const near = this.#nearest(pos.coords.latitude, pos.coords.longitude);
-      done();
-      if (near && !this.from && !this.to) this.#setRoute(near, '');
-    }, done, { enableHighAccuracy: false, timeout: 10_000, maximumAge: 600_000 });
+      done(near ? '' : 'No Spanish airport within 200 km of you');
+      if (near) this.#setRoute(near, this.to);
+    }, err => done({
+      1: 'Location is blocked for this page. Allow it in the browser settings',
+      2: 'This device could not tell where it is',
+      3: 'Finding your location took too long',
+    }[err.code] || 'Could not get your location'), { enableHighAccuracy: false, timeout: 10_000, maximumAge: 600_000 });
   }
 
   #nearest(lat, lon) {
@@ -408,6 +419,7 @@ export class TorreApp extends LitElement {
         </div>
         <div class="route">
           <airport-picker label="From" anyLabel="Anywhere" recentKey="recentFrom" .options=${places} .value=${this.from}
+            locate ?busy=${this.locating} @locate-request=${() => this.#locate(true)}
             @place-change=${e => this.#setRoute(e.detail.iata, this.to)}></airport-picker>
           <airport-picker label="To" anyLabel="Anywhere" recentKey="recentTo" .options=${places} .value=${this.to}
             @place-change=${e => this.#setRoute(this.from, e.detail.iata)}></airport-picker>
@@ -447,9 +459,11 @@ export class TorreApp extends LitElement {
   #board(route, visible) {
     if (!route) {
       if (!this.airports.length && (this.from || this.to)) return html`<div class="empty">Loading…</div>`;
-      return html`<div class="empty">${this.from || this.to
-        ? 'Torre has flights from or to Spanish airports only (AENA). Make one end of the route a Spanish airport.'
-        : this.locating ? 'Finding the nearest airport…' : 'Choose where you fly from, where you fly to, or both.'}</div>`;
+      if (this.from || this.to) {
+        return html`<div class="empty">Torre has flights from or to Spanish airports only (AENA). Make one end of the route a Spanish airport.</div>`;
+      }
+      if (this.locating) return html`<div class="empty">Finding the nearest airport…</div>`;
+      return html`<div class="empty">Choose where you fly from, where you fly to, or both.</div>`;
     }
     if (this.error) return html`<div class="error">${this.error}</div>`;
     if (!this.flights.length) return html`<div class="empty">Loading…</div>`;

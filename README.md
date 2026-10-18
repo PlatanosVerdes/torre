@@ -196,6 +196,7 @@ and MAD at once peaked at 107 MiB.
 - There is no default airport. On a first visit with no route the page asks for the phone's
   location once, finds the nearest Spanish airport within 200 km **on the phone**, and starts there.
   The position is never sent anywhere; refusing, an error or being abroad leaves the route empty.
+  The location button in the From field asks again at any time, and says why when it cannot.
   Airport coordinates come with the OurAirports list.
 
 ## Configuration

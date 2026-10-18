@@ -27,6 +27,9 @@ export class AirportPicker extends LitElement {
     label: { type: String },
     anyLabel: { type: String },
     recentKey: { type: String },
+    // locate adds a location button to the field; a tap fires locate-request.
+    locate: { type: Boolean },
+    busy: { type: Boolean },
     open: { state: true },
     query: { state: true },
     active: { state: true },
@@ -45,6 +48,12 @@ export class AirportPicker extends LitElement {
       color: var(--ink); padding: 9px 0; text-overflow: ellipsis;
     }
     input:focus { font-weight: 400; }
+    .here {
+      flex: none; width: 32px; height: 32px; margin-right: -6px; border: 0; border-radius: 8px; background: none;
+      color: var(--accent); display: grid; place-items: center; cursor: pointer;
+    }
+    .here:hover { background: var(--soft); }
+    .here[disabled] { opacity: .5; cursor: progress; }
     input::placeholder { color: var(--muted); font-weight: 400; }
     ul {
       position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 30; margin: 0; padding: 4px;
@@ -81,6 +90,12 @@ export class AirportPicker extends LitElement {
           autocomplete="off" autocapitalize="words" spellcheck="false" enterkeyhint="go"
           placeholder=${this.anyLabel || 'City, airport or code'} .value=${shown}
           @focus=${this.#onFocus} @input=${this.#onInput} @keydown=${this.#onKey} @blur=${this.#close}>
+        ${this.locate ? html`<button class="here" aria-label="Use my location" title="Use my location" ?disabled=${this.busy}
+            @click=${() => this.dispatchEvent(new CustomEvent('locate-request', { bubbles: true, composed: true }))}>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M3 11l18-8-8 18-2-8z"/>
+          </svg>
+        </button>` : ''}
       </div>
       ${this.open ? html`
         <ul id="list" role="listbox">

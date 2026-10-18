@@ -76,7 +76,7 @@ export class FlightDetails extends LitElement {
 
 export function followInTelegram(bot, flight) {
   return bot
-    ? html`<a class="btn" href="https://t.me/${bot}?startapp=${TelegramWebApp.startParamFor(flight)}">Follow in Telegram</a>`
+    ? html`<a class="btn" href="https://t.me/${bot}?start=${TelegramWebApp.startParamFor(flight)}" target="_blank" rel="noopener">Follow in Telegram</a>`
     : html`<div class="note">Open Torre from Telegram to follow flights.</div>`;
 }
 

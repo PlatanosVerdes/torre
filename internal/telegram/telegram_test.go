@@ -117,3 +117,24 @@ func TestInitData(t *testing.T) {
 		t.Error("empty data was accepted")
 	}
 }
+
+func TestUpdatesAndTheirErrors(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/getUpdates") {
+			_, _ = w.Write([]byte(`{"ok":true,"result":[{"update_id":7,"message":{"text":"/start","chat":{"id":42,"type":"private"}}}]}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"ok":false,"description":"Conflict: terminated by other getUpdates request"}`))
+	}))
+	defer srv.Close()
+	bot := New("secret-token")
+	bot.APIURL = srv.URL + "/bot"
+	got, err := bot.Updates(context.Background(), 0)
+	if err != nil || len(got) != 1 || got[0].Message.Chat.ID != 42 {
+		t.Fatalf("got %+v, %v", got, err)
+	}
+	err = bot.Setup(context.Background(), "https://x", map[string]string{"start": "Open"})
+	if err == nil || !strings.Contains(err.Error(), "Conflict") || strings.Contains(err.Error(), "secret-token") {
+		t.Errorf("setup error: %v", err)
+	}
+}

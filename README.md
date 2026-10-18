@@ -68,6 +68,22 @@ A flight further out than AENA publishes (about two weeks) is kept as pending an
 appears. A flight is dropped six hours after it departs, lands or is cancelled, or two days after its
 date if AENA never lists it again. Each chat can follow 10 at a time.
 
+### The bot
+
+[@TorreFlightsBot](https://t.me/TorreFlightsBot) is torre's own, so torre reads its messages
+(`TORRE_BOT_UPDATES=1`, `internal/bot`):
+
+| Message | Answer |
+| :--- | :--- |
+| `/start` | What Torre does, with a button that opens the page |
+| `/start BCN_S_18102026_FR2495` | That flight, with a button that opens it. "Follow in Telegram" links from a browser land here |
+| `/flights` | The flights the chat follows and their state |
+| `/help` | What Torre does |
+| A photo or file | Boarding passes go through the page, so the booking reference stays on the phone |
+
+On start it also sets the chat menu button to open the page and publishes the command list. Groups are
+ignored, and each chat gets at most 20 answers a minute.
+
 ### Who is following
 
 - **Inside Telegram** (the Mini App, opened from a bot button), Telegram signs the launch data with
@@ -146,6 +162,7 @@ and MAD at once peaked at 107 MiB.
 | `TORRE_OWNER_CHAT` | | Private deployments only: the chat a plain browser follows for. Leave empty when public |
 | `TORRE_PUBLIC_URL` | | The page's address, for the "Open in Torre" button. No button when empty |
 | `TORRE_BOT_NAME` | | The bot's username, for "Follow in Telegram" links from a browser |
+| `TORRE_BOT_UPDATES` | | `1` makes torre answer its bot's messages. Only for a bot it has to itself: Telegram allows one reader per token |
 | `TORRE_CLIENT_IP_HEADER` | | The header the proxy in front writes the visitor's address into |
 | `TORRE_LOG_JSON` | `1` in the image | JSON logs, which Vector collects |
 | `TORRE_AENA_URL` | `https://www.aena.es` | For tests |

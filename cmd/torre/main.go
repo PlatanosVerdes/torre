@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/PlatanosVerdes/torre/internal/aena"
+	"github.com/PlatanosVerdes/torre/internal/bot"
 	"github.com/PlatanosVerdes/torre/internal/server"
 	"github.com/PlatanosVerdes/torre/internal/telegram"
 	"github.com/PlatanosVerdes/torre/internal/watch"
@@ -33,11 +34,13 @@ func run() error {
 		dataDir   = env("TORRE_DATA_DIR", "./data")
 		ttl       = duration("TORRE_CACHE", 30*time.Second)
 		every     = duration("TORRE_CHECK_EVERY", 2*time.Minute)
-		bot       = telegram.New(env("TORRE_TELEGRAM_TOKEN", ""))
+		tg        = telegram.New(env("TORRE_TELEGRAM_TOKEN", ""))
 		owner     = env("TORRE_OWNER_CHAT", "")
 		publicURL = env("TORRE_PUBLIC_URL", "")
 		ipHeader  = env("TORRE_CLIENT_IP_HEADER", "")
 		botName   = env("TORRE_BOT_NAME", "")
+		// Only for a bot torre has to itself: a shared bot already has its one reader of updates.
+		readBot   = env("TORRE_BOT_UPDATES", "") == "1"
 		aenaURL   = env("TORRE_AENA_URL", aena.DefaultBaseURL)
 		logAsJSON = env("TORRE_LOG_JSON", "") == "1"
 	)
@@ -58,7 +61,7 @@ func run() error {
 	}
 
 	client := aena.New(aenaURL, ttl)
-	watcher, err := watch.New(dataDir, client, bot, client.Zone, log)
+	watcher, err := watch.New(dataDir, client, tg, client.Zone, log)
 	if err != nil {
 		return err
 	}
@@ -67,11 +70,14 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	go watcher.Run(ctx, every)
+	if readBot && tg.Enabled() && publicURL != "" {
+		go (&bot.Bot{TG: tg, Watch: watcher, BaseURL: publicURL, Log: log}).Run(ctx)
+	}
 
 	srv := &http.Server{
 		Addr: ":" + strconv.Itoa(port),
 		Handler: (&server.Server{
-			Board: client, Watch: watcher, Bot: bot, Version: buildVersion, Log: log,
+			Board: client, Watch: watcher, Bot: tg, Version: buildVersion, Log: log,
 			OwnerChat: owner, ClientIPHeader: ipHeader, BotName: botName,
 		}).Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
@@ -89,7 +95,7 @@ func run() error {
 	}()
 
 	log.Info("torre listening", "version", buildVersion, "port", port,
-		"telegram", bot.Enabled(), "owner", owner != "", "public_url", publicURL)
+		"telegram", tg.Enabled(), "bot_updates", readBot, "owner", owner != "", "public_url", publicURL)
 	if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}

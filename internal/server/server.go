@@ -18,6 +18,7 @@ import (
 
 	"github.com/PlatanosVerdes/torre/internal/aena"
 	"github.com/PlatanosVerdes/torre/internal/limit"
+	"github.com/PlatanosVerdes/torre/internal/places"
 	"github.com/PlatanosVerdes/torre/internal/telegram"
 	"github.com/PlatanosVerdes/torre/internal/watch"
 )
@@ -66,6 +67,7 @@ func (s *Server) Handler() http.Handler {
 	})
 	mux.HandleFunc("GET /api/airports", s.limited(s.api, s.airports))
 	mux.HandleFunc("GET /api/board", s.limited(s.api, s.board))
+	mux.HandleFunc("GET /api/places", s.limited(s.api, s.places))
 	mux.HandleFunc("GET /api/tracked", s.limited(s.api, s.listTracked))
 	mux.HandleFunc("POST /api/tracked", s.limited(s.follow, s.addTracked))
 	mux.HandleFunc("DELETE /api/tracked/{id}", s.limited(s.follow, s.removeTracked))
@@ -159,6 +161,12 @@ func (s *Server) airports(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Cache-Control", "max-age=86400")
 	s.json(w, r, list)
+}
+
+// places is every airport in the world with scheduled flights, for picking the far end of a route.
+func (s *Server) places(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "max-age=86400")
+	s.json(w, r, places.All())
 }
 
 // known refuses codes AENA does not run, so a visitor cannot make the Pi ask AENA for 17,000

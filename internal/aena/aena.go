@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/PlatanosVerdes/torre/internal/places"
 )
 
 const DefaultBaseURL = "https://www.aena.es"
@@ -68,10 +70,13 @@ type Flight struct {
 	Direction Direction `json:"direction"`
 	Airport   string    `json:"airport"`
 	Other     string    `json:"other"`
-	OtherCity string    `json:"otherCity"`
-	Date      string    `json:"date"`
-	Scheduled string    `json:"scheduled"`
-	Estimated string    `json:"estimated,omitempty"`
+	// OtherCity is the far end in English when the code is known ("London Gatwick"); OtherLocal is
+	// what AENA calls it ("LONDRES /GATWICK"), kept so a Spanish search still finds it.
+	OtherCity  string `json:"otherCity"`
+	OtherLocal string `json:"otherLocal,omitempty"`
+	Date       string `json:"date"`
+	Scheduled  string `json:"scheduled"`
+	Estimated  string `json:"estimated,omitempty"`
 	// EstimatedDate differs from Date when the delay crosses midnight.
 	EstimatedDate string `json:"estimatedDate,omitempty"`
 	DelayMin      int    `json:"delayMin"`
@@ -393,19 +398,19 @@ func operates(codes string) bool {
 
 func toFlight(r raw, dir Direction, zone *time.Location, now time.Time) Flight {
 	f := Flight{
-		Number:    clean(r.AirlineIATA) + clean(r.Number),
-		Airline:   clean(r.AirlineName),
-		Direction: dir,
-		Airport:   clean(r.Airport),
-		Other:     clean(r.Other),
-		OtherCity: clean(r.OtherCity),
-		Date:      clean(r.Date),
-		Scheduled: hhmm(r.Scheduled),
-		Status:    clean(r.Status),
-		Terminal:  clean(r.Terminal),
-		Aircraft:  clean(r.Aircraft),
-		Gate:      clean(r.Gate),
-		Belt:      clean(r.Belt),
+		Number:     clean(r.AirlineIATA) + clean(r.Number),
+		Airline:    clean(r.AirlineName),
+		Direction:  dir,
+		Airport:    clean(r.Airport),
+		Other:      clean(r.Other),
+		OtherLocal: clean(r.OtherCity),
+		Date:       clean(r.Date),
+		Scheduled:  hhmm(r.Scheduled),
+		Status:     clean(r.Status),
+		Terminal:   clean(r.Terminal),
+		Aircraft:   clean(r.Aircraft),
+		Gate:       clean(r.Gate),
+		Belt:       clean(r.Belt),
 	}
 	if f.Number == clean(r.Number) {
 		f.Number = clean(r.AirlineICAO) + clean(r.Number)
@@ -421,6 +426,10 @@ func toFlight(r raw, dir Direction, zone *time.Location, now time.Time) Flight {
 		if to != "" && to != from {
 			f.Counters += "–" + to
 		}
+	}
+	f.OtherCity = f.OtherLocal
+	if p, ok := places.Lookup(f.Other); ok {
+		f.OtherCity = p.Name
 	}
 	if f.Terminal == "N" {
 		f.Terminal = ""

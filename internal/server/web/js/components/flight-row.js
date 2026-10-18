@@ -1,6 +1,6 @@
 import { LitElement, html, css } from '../../vendor/lit-3.3.3.js';
 import { shared } from '../styles.js';
-import { dayLabel, title, tone } from '../format.js';
+import { dayLabel, farEnd, tone } from '../format.js';
 
 // One line of the board. A tap fires flight-select with the flight, and the tracked id when the
 // row stands for a followed flight.
@@ -40,7 +40,7 @@ export class FlightRow extends LitElement {
           ? html`<div class="time ${f.delayMin >= 15 ? 'late' : ''}">${f.estimated}<s>${f.scheduled}</s></div>`
           : html`<div class="time">${f.scheduled}</div>`}
         <div class="dest">
-          ${this.withRoute ? `${f.airport} ${f.direction === 'L' ? '←' : '→'} ` : ''}<span class="iata">${f.other}</span>${title(f.otherCity || f.other)}
+          ${this.withRoute ? `${f.airport} ${f.direction === 'L' ? '←' : '→'} ` : ''}<span class="iata">${f.other}</span>${farEnd(f)}
         </div>
         <div class="side">
           <span class="badge ${tone(f)}">${f.statusLabel}</span>

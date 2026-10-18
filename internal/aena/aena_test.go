@@ -190,3 +190,15 @@ func TestFailuresAreNotRetriedOnEveryRequest(t *testing.T) {
 		t.Errorf("a down AENA was asked %d times in a row", n)
 	}
 }
+
+func TestFarEndInEnglish(t *testing.T) {
+	r := row("2495", "FR", "FR,RYR,,FR,RYR,RYR", "12:20", "12:20", "INI")
+	f := Normalize([]raw{r}, Departures, madrid, at("18/10/2026 10:00"))[0]
+	if f.OtherCity != "Palma de Mallorca" || f.OtherLocal != "PALMA DE MALLORCA" {
+		t.Errorf("city %q, local %q", f.OtherCity, f.OtherLocal)
+	}
+	r.Other, r.OtherCity = "ZZZ", "SITIO RARO"
+	if f := Normalize([]raw{r}, Departures, madrid, at("18/10/2026 10:00"))[0]; f.OtherCity != "SITIO RARO" {
+		t.Errorf("an unknown code lost AENA's name: %q", f.OtherCity)
+	}
+}

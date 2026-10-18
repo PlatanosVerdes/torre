@@ -48,8 +48,15 @@ export function statusText(f) {
   return f.status === 'RET' && f.delayMin > 0 ? `Delayed ${delay(f.delayMin)}` : f.statusLabel;
 }
 
+// farEnd is the other airport's name: in English when the server knew the code, else AENA's
+// upper-case Spanish name, tidied.
+export function farEnd(f) {
+  const name = f.otherCity || f.other || '';
+  return name === name.toUpperCase() ? title(name) : name;
+}
+
 export function place(f) {
-  return title(f.otherCity || f.other) + (f.other ? ` (${f.other})` : '');
+  return farEnd(f) + (f.other ? ` (${f.other})` : '');
 }
 
 // close is true when word is a typo away from the start of token: one edit for short words, two

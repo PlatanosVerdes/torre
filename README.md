@@ -26,6 +26,26 @@ rather than parsed.
 
 It covers AENA airports only, which means Spain. A flight between two other countries has no data.
 
+### Choosing a route
+
+The page asks where you fly **from** and **to**, not for a board. Since AENA only has boards for its
+own airports, the route picks one: departures at `from` when it is a Spanish airport, narrowed to
+`to` if set; otherwise arrivals at `to`, narrowed to `from`. "From BCN" is Barcelona's departures,
+"To PMI" Palma's arrivals, "From London Heathrow to PMI" Palma's arrivals from LHR, and a route with
+neither end in Spain says so.
+
+Both fields search as you type, by code, name or city, without accents and forgiving typos. They
+offer AENA's airports and every other airport with scheduled flights, from
+[OurAirports](https://ourairports.com/data/) (public domain), embedded in the binary as
+`internal/places/places.json` and regenerated with `go run ./cmd/genplaces`. That list is also what
+names the far end of a flight in English ("London Gatwick" where AENA writes "LONDRES /GATWICK");
+AENA's own name stays searchable, so "Londres" works too. Places the loaded board actually flies to
+rank first: from Barcelona, "new york" offers JFK and Newark before Stewart.
+
+The flight search below the route works the same way. When nothing matches exactly it retries
+tolerating a typo or two, and also compares names written as one word ("aireropa" finds Air Europa),
+and the page says it is showing close matches.
+
 ### What the service does with it
 
 - **Codeshares fold into one flight.** AENA lists a plane once per marketing carrier: VY3906, IB5126,
@@ -176,13 +196,15 @@ carry `X-Telegram-Init-Data`.
 | :--- | :--- |
 | `GET /api/board?airport=BCN&dir=S` | The board. `dir=L` for arrivals, `range=full` for two weeks |
 | `GET /api/airports` | AENA's airports |
+| `GET /api/places` | Every airport with scheduled flights (OurAirports) |
 | `GET /api/tracked` | Your followed flights, and whether you can follow from here |
 | `POST /api/tracked` | Follow `{"airport":"BCN","direction":"S","date":"18/10/2026","number":"FR2495"}` |
 | `DELETE /api/tracked/{id}` | Stop following |
 | `GET /healthz` | `ok <version>` |
 
-The page also opens a flight directly: `/?a=BCN&d=S&f=FR2495`, or inside Telegram with the start
-parameter `BCN_S_18102026_FR2495`.
+The page opens a route with `/?from=BCN&to=PMI`, and a flight directly with
+`/?from=BCN&f=FR2495`. The older `/?a=BCN&d=S` still works (`d=L` meaning arrivals, so `to`).
+Inside Telegram the start parameter `BCN_S_18102026_FR2495` opens that flight.
 
 ## Layout of the page
 
@@ -194,7 +216,7 @@ internal/server/web/
   js/telegram.js             TelegramWebApp: launch data, theme, start parameter
   js/boarding-pass.js        BoardingPass: barcode and Wallet reading, BCBP parsing
   js/format.js, styles.js    how a flight reads and looks, shared by every component
-  js/components/             torre-app, airport-picker, flight-row, flight-details, pass-legs, torre-sheet
+  js/components/             torre-app, airport-picker (from and to), flight-row, flight-details, pass-legs, torre-sheet
   vendor/                    Lit and zxing-wasm, pinned by version in the file name, with licences
 ```
 

@@ -1,104 +1,134 @@
 import { LitElement, html, css } from '../../vendor/lit-3.3.3.js';
 import { shared } from '../styles.js';
-import { norm } from '../format.js';
+import { close, norm } from '../format.js';
 
-const RECENT_KEY = 'recentAirports';
 const RECENT_MAX = 4;
+// Thousands of airports would freeze a phone if all were drawn; typing narrows them anyway.
+const SHOWN = 60;
 
-function loadRecent() {
-  try { return JSON.parse(localStorage.getItem(RECENT_KEY) || '[]'); } catch { return []; }
+function loadRecent(key) {
+  try { return JSON.parse(localStorage.getItem(key) || '[]'); } catch { return []; }
 }
 
-function saveRecent(list) {
-  try { localStorage.setItem(RECENT_KEY, JSON.stringify(list)); } catch {}
+function saveRecent(key, list) {
+  try { localStorage.setItem(key, JSON.stringify(list)); } catch {}
 }
 
-// A search-as-you-type airport field. It matches the code, the name and the city without accents
-// ("malaga" finds Málaga), puts recently used airports first, and fires airport-change {iata}.
+// A search-as-you-type place field, one per end of the route. It matches the code, the name and
+// the city without accents and forgives typos, puts recent picks first, offers "Anywhere" when
+// anyLabel is set, and fires place-change {iata} ('' for anywhere).
+//
+// options: [{iata, name, city, country, alias, aena}]. aena is false outside Spain; alias holds the
+// Spanish name AENA uses ("LONDRES /GATWICK"), so both languages find it.
 export class AirportPicker extends LitElement {
   static properties = {
-    airports: { attribute: false },
+    options: { attribute: false },
     value: { type: String },
+    label: { type: String },
+    anyLabel: { type: String },
+    recentKey: { type: String },
     open: { state: true },
     query: { state: true },
     active: { state: true },
   };
 
   static styles = [shared, css`
-    :host { display: block; position: relative; flex: 1; min-width: 0; }
-    input {
-      width: 100%; font: inherit; font-weight: 600; color: var(--ink); background: var(--card);
-      border: 1px solid var(--line); border-radius: 10px; padding: 9px 10px;
-      text-overflow: ellipsis;
+    :host { display: block; position: relative; min-width: 0; }
+    .box {
+      display: flex; align-items: center; gap: 8px; background: var(--card); border: 1px solid var(--line);
+      border-radius: 10px; padding: 0 10px;
     }
-    input:focus { outline: 2px solid var(--accent); outline-offset: -1px; font-weight: 400; }
+    .box:focus-within { outline: 2px solid var(--accent); outline-offset: -1px; }
+    .label { color: var(--muted); font-size: 13px; font-weight: 600; min-width: 34px; }
+    input {
+      flex: 1; min-width: 0; border: 0; background: none; outline: none; font: inherit; font-weight: 600;
+      color: var(--ink); padding: 9px 0; text-overflow: ellipsis;
+    }
+    input:focus { font-weight: 400; }
+    input::placeholder { color: var(--muted); font-weight: 400; }
     ul {
       position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 30; margin: 0; padding: 4px;
       list-style: none; background: var(--card); border: 1px solid var(--line); border-radius: 12px;
-      box-shadow: 0 8px 24px rgba(0, 0, 0, .18); max-height: min(60vh, 360px); overflow-y: auto;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, .18); max-height: min(55vh, 340px); overflow-y: auto;
     }
-    li {
-      display: flex; gap: 10px; align-items: baseline; padding: 9px 10px; border-radius: 8px; cursor: pointer;
-    }
+    li { display: flex; gap: 10px; align-items: baseline; padding: 9px 10px; border-radius: 8px; cursor: pointer; }
     li[aria-selected="true"] { background: var(--soft); }
     .code { font-weight: 700; font-variant-numeric: tabular-nums; min-width: 34px; }
     .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .city { color: var(--muted); font-size: 13px; margin-left: auto; white-space: nowrap; }
-    .label { padding: 6px 10px 2px; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); cursor: default; }
+    .note { color: var(--muted); font-size: 12px; margin-left: auto; white-space: nowrap; }
+    .heading { padding: 6px 10px 2px; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); cursor: default; }
     .none { padding: 12px 10px; color: var(--muted); cursor: default; }
   `];
 
   constructor() {
     super();
-    this.airports = [];
+    this.options = [];
+    this.value = '';
     this.open = false;
     this.query = '';
     this.active = 0;
   }
 
   render() {
-    const current = this.airports.find(a => a.iata === this.value);
-    const shown = this.open ? this.query : current ? `${current.iata} · ${current.name}` : this.value || '';
-    const { items, recent } = this.#matches();
+    const current = this.options.find(o => o.iata === this.value);
+    const shown = this.open ? this.query : current ? `${current.iata} · ${current.name}` : this.value;
+    const { items: all, recent } = this.#matches();
+    const items = all.slice(0, SHOWN);
     return html`
-      <input type="text" role="combobox" aria-label="Airport" aria-expanded=${this.open} aria-controls="list"
-        autocomplete="off" autocapitalize="characters" spellcheck="false" enterkeyhint="go"
-        placeholder="Airport, city or code" .value=${shown}
-        @focus=${this.#onFocus} @input=${this.#onInput} @keydown=${this.#onKey} @blur=${this.#onBlur}>
+      <div class="box">
+        <span class="label">${this.label}</span>
+        <input type="text" role="combobox" aria-label=${this.label} aria-expanded=${this.open} aria-controls="list"
+          autocomplete="off" autocapitalize="words" spellcheck="false" enterkeyhint="go"
+          placeholder=${this.anyLabel || 'City, airport or code'} .value=${shown}
+          @focus=${this.#onFocus} @input=${this.#onInput} @keydown=${this.#onKey} @blur=${this.#close}>
+      </div>
       ${this.open ? html`
         <ul id="list" role="listbox">
-          ${recent ? html`<li class="label" role="presentation">Recent</li>` : ''}
-          ${items.length ? items.map((a, i) => html`
-            ${recent && i === recent ? html`<li class="label" role="presentation">All airports</li>` : ''}
+          ${items.length ? items.map((o, i) => html`
+            ${recent && i === 0 ? html`<li class="heading" role="presentation">Recent</li>` : ''}
+            ${recent && i === recent ? html`<li class="heading" role="presentation">All</li>` : ''}
             <li role="option" aria-selected=${i === this.active}
-              @pointerdown=${e => { e.preventDefault(); this.#choose(a); }}
+              @pointerdown=${e => { e.preventDefault(); this.#choose(o); }}
               @pointerenter=${() => { this.active = i; }}>
-              <span class="code">${a.iata}</span><span class="name">${a.name}</span>
-              ${a.city && !norm(a.name).includes(norm(a.city)) ? html`<span class="city">${a.city}</span>` : ''}
+              ${o.iata === '' ? html`<span class="name">${this.anyLabel}</span>` : html`
+                <span class="code">${o.iata}</span><span class="name">${o.name}</span>
+                ${o.aena === false ? html`<span class="note">${o.country || ''}</span>` : ''}`}
             </li>`)
-          : html`<li class="none" role="presentation">No AENA airport matches</li>`}
+          : html`<li class="none" role="presentation">No airport matches</li>`}
         </ul>` : ''}`;
   }
 
-  // Ranked: exact code, then code prefix, then a word of the name or city starting with the query,
-  // then anywhere in them. With no query, recent airports come first and the rest follow.
+  // Ranked: exact code, code prefix, a word starting with the query, the query anywhere, then a
+  // typo away. With no query: "Anywhere", recent picks, Spanish airports, then the rest.
   #matches() {
     const q = norm(this.query).trim();
     if (!q) {
-      const recent = loadRecent().map(c => this.airports.find(a => a.iata === c)).filter(Boolean);
-      const rest = this.airports.filter(a => !recent.includes(a));
-      return { items: [...recent, ...rest], recent: recent.length };
+      const recent = loadRecent(this.recentKey).map(c => this.options.find(o => o.iata === c)).filter(Boolean);
+      const rest = this.options.filter(o => !recent.includes(o))
+        .sort((a, b) => (a.aena === false) - (b.aena === false) || a.name.localeCompare(b.name));
+      const any = this.anyLabel && this.value ? [{ iata: '' }] : [];
+      return { items: [...any, ...recent, ...rest], recent: recent.length ? recent.length + any.length : 0 };
     }
+    const parts = q.split(/\s+/);
     const scored = [];
-    for (const a of this.airports) {
-      const code = a.iata.toLowerCase();
-      const text = norm(`${a.name} ${a.city}`);
+    for (const o of this.options) {
+      const code = o.iata.toLowerCase();
+      const name = norm(o.name);
+      const text = norm(`${o.name} ${o.city || ''} ${o.alias || ''}`);
+      const words = text.split(/[\s\-/()]+/).filter(Boolean);
       let score = -1;
       if (code === q) score = 0;
       else if (code.startsWith(q)) score = 1;
-      else if (text.split(/[\s\-/()]+/).some(w => w.startsWith(q))) score = 2;
-      else if (text.includes(q)) score = 3;
-      if (score >= 0) scored.push([score, a]);
+      else if (name.startsWith(q)) score = 2;
+      else if (parts.every(p => words.some(w => w.startsWith(p)))) score = 3;
+      else if (text.includes(q) || text.replace(/\s+/g, '').includes(q.replace(/\s+/g, ''))) score = 4;
+      else if (words.some(w => close(q, w)) || close(q, text.replace(/\s+/g, ''))) score = 5;
+      if (score < 0) continue;
+      // A place the loaded board flies to (an alias means AENA listed it) jumps a tier: JFK before
+      // New York Stewart from Barcelona. Codes typed outright still win, and the unserved rest of
+      // the world comes after Spain.
+      const reach = o.aena !== false ? 0 : o.alias ? -1.2 : 0.6;
+      scored.push([score + reach, o]);
     }
     scored.sort((x, y) => x[0] - y[0] || x[1].name.localeCompare(y[1].name));
     return { items: scored.map(s => s[1]), recent: 0 };
@@ -108,7 +138,6 @@ export class AirportPicker extends LitElement {
     this.query = '';
     this.active = 0;
     this.open = true;
-    // Select-all would fight the keyboard on iOS; an empty field is what the user wants to type into.
     e.target.value = '';
   }
 
@@ -123,22 +152,21 @@ export class AirportPicker extends LitElement {
     if (e.key === 'ArrowDown') { e.preventDefault(); this.active = Math.min(this.active + 1, items.length - 1); this.#scrollActive(); }
     else if (e.key === 'ArrowUp') { e.preventDefault(); this.active = Math.max(this.active - 1, 0); this.#scrollActive(); }
     else if (e.key === 'Enter') { e.preventDefault(); if (items[this.active]) this.#choose(items[this.active]); }
-    else if (e.key === 'Escape') { this.#close(); }
+    else if (e.key === 'Escape') { this.renderRoot.querySelector('input')?.blur(); }
   }
-
-  #onBlur() { this.#close(); }
 
   #close() {
     this.open = false;
     this.query = '';
-    this.renderRoot.querySelector('input')?.blur();
   }
 
-  #choose(a) {
-    saveRecent([a.iata, ...loadRecent().filter(c => c !== a.iata)].slice(0, RECENT_MAX));
-    this.#close();
-    if (a.iata !== this.value) {
-      this.dispatchEvent(new CustomEvent('airport-change', { detail: { iata: a.iata }, bubbles: true, composed: true }));
+  #choose(o) {
+    if (o.iata && this.recentKey) {
+      saveRecent(this.recentKey, [o.iata, ...loadRecent(this.recentKey).filter(c => c !== o.iata)].slice(0, RECENT_MAX));
+    }
+    this.renderRoot.querySelector('input')?.blur();
+    if (o.iata !== this.value) {
+      this.dispatchEvent(new CustomEvent('place-change', { detail: { iata: o.iata }, bubbles: true, composed: true }));
     }
   }
 

@@ -8,6 +8,8 @@ export class Api {
 
   airports() { return this.#call('api/airports'); }
 
+  places() { return this.#call('api/places'); }
+
   board(airport, dir, full) {
     return this.#call(`api/board?airport=${encodeURIComponent(airport)}&dir=${dir}${full ? '&range=full' : ''}`);
   }

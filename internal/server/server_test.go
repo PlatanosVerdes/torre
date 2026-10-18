@@ -103,6 +103,12 @@ func TestPageHealthAndHeaders(t *testing.T) {
 	if rec.Header().Get("X-Content-Type-Options") != "nosniff" {
 		t.Error("no nosniff")
 	}
+	if got := rec.Header().Get("Cross-Origin-Resource-Policy"); got != "same-origin" {
+		t.Errorf("page CORP %q, want same-origin", got)
+	}
+	if got := do(h, "GET", "/icon.svg", "").Header().Get("Cross-Origin-Resource-Policy"); got != "same-site" {
+		t.Errorf("icon CORP %q, want same-site", got)
+	}
 	if rec := do(h, "GET", "/healthz", ""); rec.Body.String() != "ok test\n" {
 		t.Errorf("/healthz answered %q", rec.Body.String())
 	}

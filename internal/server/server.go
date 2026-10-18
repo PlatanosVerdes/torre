@@ -118,7 +118,12 @@ func secure(next http.Handler) http.Handler {
 		h.Set("Referrer-Policy", "no-referrer")
 		// Location for the page itself only: it picks the nearest airport on the phone and never sends it.
 		h.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=(self), payment=(), usb=()")
-		h.Set("Cross-Origin-Resource-Policy", "same-origin")
+		corp := "same-origin"
+		if r.URL.Path == "/icon.svg" {
+			// The home server's dashboards on other platanosverdes.com hosts show it as torre's icon.
+			corp = "same-site"
+		}
+		h.Set("Cross-Origin-Resource-Policy", corp)
 		next.ServeHTTP(w, r)
 	})
 }

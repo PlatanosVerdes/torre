@@ -54,9 +54,17 @@ and the page says it is showing close matches.
 
 ### What the service does with it
 
-- **Codeshares fold into one flight.** AENA lists a plane once per marketing carrier: VY3906, IB5126,
-  QR3619 and LL5395 are one Vueling flight. The operating row is the one whose `codigosCompania`
-  leaves its third field empty. Searching or following by any of the numbers finds the same flight.
+- **Codeshares fold into one flight, under the airline that flies it.** AENA lists a plane once per
+  airline selling it (VY3919, IB5139, QR3755 and LL5408 are one Vueling flight) and nothing in the
+  rows says which one operates: `codigosCompania` looked like it did at Barcelona and points the
+  other way at Palma. Numbering does tell: an airline flies its own planes under some hundred-number
+  series and sells seats on partners' under others (Iberia flies IB04xx, sells IB51xx on Vueling;
+  Qatar never flies alone from Spain). The operator is the one airline whose number falls in a
+  series it has been seen flying alone in. That knowledge starts from `internal/aena/series.json`,
+  learnt from every AENA airport with `go run ./cmd/genseries`, and grows with every board fetched.
+  When no airline or several qualify, AENA's first row stays, which is a guess. Air Nostrum flies as
+  Iberia (IB2263, with VY5663 sold on it), and the series get that right too.
+  Searching or following by any of the numbers finds the same flight.
 - **Flight numbers are compared without padding.** Boarding passes write `FR 02495`, AENA writes
   `IB0404`; both go through `aena.Canonical` (`FR2495`, `IB404`) before they are compared.
 - **"Departed" before its time is not trusted.** AENA sometimes marks a departure `BOR` hours before

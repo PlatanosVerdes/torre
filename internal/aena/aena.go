@@ -63,12 +63,12 @@ type raw struct {
 }
 
 type Flight struct {
-	ID        string    `json:"id"`
-	Number    string    `json:"number"`
-	Codeshare []string  `json:"codeshare,omitempty"`
+	ID        string   `json:"id"`
+	Number    string   `json:"number"`
+	Codeshare []string `json:"codeshare,omitempty"`
 	// ICAO holds the same numbers with three-letter airline codes (RYR2495 for FR2495), which is
 	// how AENA's own app and many boarding sites write them.
-	ICAO []string `json:"icao,omitempty"`
+	ICAO      []string  `json:"icao,omitempty"`
 	Airline   string    `json:"airline"`
 	Direction Direction `json:"direction"`
 	Airport   string    `json:"airport"`
@@ -139,6 +139,8 @@ type Client struct {
 	HTTP    *http.Client
 	Zone    *time.Location
 	TTL     time.Duration
+	// Series tells which airline flies a codeshare flight, and learns from every board fetched.
+	Series *Series
 
 	mu       sync.Mutex
 	boards   map[string]*entry
@@ -177,6 +179,7 @@ func New(baseURL string, ttl time.Duration) *Client {
 		TTL:      ttl,
 		boards:   map[string]*entry{},
 		fullSlot: make(chan struct{}, 1),
+		Series:   NewSeries(),
 	}
 }
 
@@ -285,7 +288,7 @@ func (c *Client) fetch(ctx context.Context, airport string, dir Direction, short
 	if err := c.getJSON(ctx, "/sites/Satellite?"+q.Encode(), &rows); err != nil {
 		return nil, err
 	}
-	return Normalize(rows, dir, c.Zone, time.Now()), nil
+	return Normalize(rows, dir, c.Zone, time.Now(), c.Series), nil
 }
 
 func (c *Client) getJSON(ctx context.Context, path string, v any) error {
@@ -345,16 +348,20 @@ func (c *Client) Airports(ctx context.Context) ([]Airport, error) {
 	return list, nil
 }
 
-// Normalize turns rows into flights, folding codeshares into the operating flight: AENA lists
-// one physical flight once per marketing carrier (VY3906, IB5126, QR3619 and LL5395 are one plane).
-func Normalize(rows []raw, dir Direction, zone *time.Location, now time.Time) []Flight {
-	type group struct {
-		flight   Flight
-		operated bool
-	}
-	groups := map[string]*group{}
-	var order []string
+// member is one row of a group: the flight as that airline sells it.
+type member struct {
+	flight  Flight
+	airline string
+	number  string
+}
 
+// Normalize turns rows into flights, folding codeshares into the operating flight: AENA lists
+// one physical flight once per selling airline (VY3919, IB5139, QR3755 and LL5408 are one plane).
+// series picks which of them flies it; nil, or no airline owning its number's series, keeps the
+// first row AENA listed.
+func Normalize(rows []raw, dir Direction, zone *time.Location, now time.Time, series *Series) []Flight {
+	groups := map[string][]member{}
+	var order []string
 	for _, r := range rows {
 		f := toFlight(r, dir, zone, now)
 		key := strings.Join([]string{f.Date, f.Scheduled, f.Other, f.Terminal, f.Aircraft, f.Gate, f.Counters, f.Belt}, "|")
@@ -362,27 +369,31 @@ func Normalize(rows []raw, dir Direction, zone *time.Location, now time.Time) []
 		if strings.HasSuffix(r.Number, "S") {
 			key += "|" + strings.TrimSuffix(f.Number, "S")
 		}
-		operated := operates(r.Codes)
-
-		g, ok := groups[key]
-		if !ok {
-			groups[key] = &group{flight: f, operated: operated}
+		if _, ok := groups[key]; !ok {
 			order = append(order, key)
-			continue
 		}
-		if operated && !g.operated {
-			f.Codeshare = append(append(f.Codeshare, g.flight.Number), g.flight.Codeshare...)
-			f.ICAO = append(f.ICAO, g.flight.ICAO...)
-			g.flight, g.operated = f, true
-		} else if f.Number != g.flight.Number && !strings.HasSuffix(f.Number, "S") {
-			g.flight.Codeshare = append(g.flight.Codeshare, f.Number)
-			g.flight.ICAO = append(g.flight.ICAO, f.ICAO...)
-		}
+		groups[key] = append(groups[key], member{flight: f, airline: clean(r.AirlineIATA), number: clean(r.Number)})
 	}
 
-	out := make([]Flight, 0, len(order))
+	all := make([][]member, 0, len(order))
 	for _, k := range order {
-		f := groups[k].flight
+		all = append(all, groups[k])
+	}
+	series.Learn(planes(all))
+
+	out := make([]Flight, 0, len(all))
+	for _, g := range all {
+		op := operator(g, series)
+		f := g[op].flight
+		for i, m := range g {
+			if i == op {
+				continue
+			}
+			if m.flight.Number != f.Number && !strings.HasSuffix(m.number, "S") {
+				f.Codeshare = append(f.Codeshare, m.flight.Number)
+			}
+			f.ICAO = append(f.ICAO, m.flight.ICAO...)
+		}
 		f.ID = f.Date + "-" + f.Number
 		sort.Strings(f.Codeshare)
 		out = append(out, f)
@@ -396,11 +407,45 @@ func Normalize(rows []raw, dir Direction, zone *time.Location, now time.Time) []
 	return out
 }
 
-// operates reads codigosCompania. The operating carrier's row leaves the third field empty
-// ("VY,VLG,,VY,VLG,VLG"); a marketing carrier's fills it ("IB,IBE,IB,IBE,IBE,IBE").
-func operates(codes string) bool {
-	parts := strings.Split(codes, ",")
-	return len(parts) >= 3 && parts[2] == ""
+// planes regroups for learning by day, time, far end and aircraft only. AENA sometimes gives one
+// airline's row of a shared flight its own desks or gate, which splits it off above; learning from
+// that split would teach Iberia that IB5139 is a flight it flies alone.
+func planes(groups [][]member) [][]member {
+	byPlane := map[string][]member{}
+	var order []string
+	for _, g := range groups {
+		f := g[0].flight
+		k := f.Date + "|" + f.Scheduled + "|" + f.Other + "|" + f.Aircraft
+		if _, ok := byPlane[k]; !ok {
+			order = append(order, k)
+		}
+		byPlane[k] = append(byPlane[k], g...)
+	}
+	out := make([][]member, 0, len(order))
+	for _, k := range order {
+		out = append(out, byPlane[k])
+	}
+	return out
+}
+
+// operator is the index of the row that flies the plane: the only airline whose number falls in
+// a series it flies alone. Several or none leaves AENA's first row, which is a guess either way.
+func operator(g []member, series *Series) int {
+	found := -1
+	for i, m := range g {
+		if series.Owns(m.airline, m.number) {
+			if found >= 0 && g[found].airline != m.airline {
+				return 0
+			}
+			if found < 0 {
+				found = i
+			}
+		}
+	}
+	if found < 0 {
+		return 0
+	}
+	return found
 }
 
 func toFlight(r raw, dir Direction, zone *time.Location, now time.Time) Flight {

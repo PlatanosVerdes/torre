@@ -2,7 +2,8 @@ FROM golang:1.26-alpine AS build
 
 WORKDIR /src
 ARG VERSION=local
-COPY go.mod ./
+COPY go.mod go.sum ./
+RUN go mod download
 COPY cmd/ ./cmd/
 COPY internal/ ./internal/
 # Static binary: the runtime image has no libc to link against.

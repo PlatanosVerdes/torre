@@ -220,6 +220,7 @@ and MAD at once peaked at 107 MiB.
 | `TORRE_PUBLIC_URL` | | The page's address, for the "Open in Torre" button. No button when empty |
 | `TORRE_BOT_NAME` | | The bot's username, for "Follow in Telegram" links from a browser |
 | `TORRE_BOT_UPDATES` | | `1` makes torre answer its bot's messages. Only for a bot it has to itself: Telegram allows one reader per token |
+| `TORRE_STATS_ADDR` | | With the bot on, an address such as `:9180` that exposes its stats at `/bot-stats`: who uses it, its traffic and the updates the rate limit turned away (`gonana/botstats`, kept in `bot-stats.json` in the data dir). It lists names: never publish it |
 | `TORRE_CLIENT_IP_HEADER` | | The header the proxy in front writes the visitor's address into |
 | `TORRE_LOG_JSON` | `1` in the image | JSON logs, which Vector collects |
 | `TORRE_AENA_URL` | `https://www.aena.es` | For tests |

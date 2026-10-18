@@ -8,10 +8,12 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"syscall"
 	"time"
 
+	"github.com/PlatanosVerdes/gonana/botstats"
 	"github.com/PlatanosVerdes/torre/internal/aena"
 	"github.com/PlatanosVerdes/torre/internal/bot"
 	"github.com/PlatanosVerdes/torre/internal/server"
@@ -43,6 +45,8 @@ func run() error {
 		readBot   = env("TORRE_BOT_UPDATES", "") == "1"
 		aenaURL   = env("TORRE_AENA_URL", aena.DefaultBaseURL)
 		logAsJSON = env("TORRE_LOG_JSON", "") == "1"
+		// Lists names: never publish this address.
+		statsAddr = env("TORRE_STATS_ADDR", "")
 	)
 	// Under ten seconds the cache stops protecting AENA from a page left open on several phones.
 	if ttl < 10*time.Second {
@@ -85,7 +89,17 @@ func run() error {
 	watcher.StopButton = ownBot
 	go watcher.Run(ctx, every)
 	if ownBot {
-		go (&bot.Bot{TG: tg, Watch: watcher, BaseURL: publicURL, Log: log}).Run(ctx)
+		b := &bot.Bot{TG: tg, Watch: watcher, BaseURL: publicURL, Log: log}
+		if statsAddr != "" {
+			rec, err := botstats.Open(filepath.Join(dataDir, "bot-stats.json"))
+			if err != nil {
+				return err
+			}
+			b.Stats = rec
+			go rec.Loop(ctx)
+			go serveStats(statsAddr, rec, botName, watcher, log)
+		}
+		go b.Run(ctx)
 	}
 
 	srv := &http.Server{
@@ -137,4 +151,22 @@ func duration(key string, def time.Duration) time.Duration {
 		return def
 	}
 	return d
+}
+
+func serveStats(addr string, rec *botstats.Recorder, name string, w *watch.Watcher, log *slog.Logger) {
+	about := func() botstats.About {
+		flights := w.List("")
+		chats := map[string]bool{}
+		for _, t := range flights {
+			chats[t.Chat] = true
+		}
+		return botstats.About{Platform: "telegram", Bot: name, Name: "Torre", Extra: []botstats.Extra{
+			{Label: "Flights followed", Value: strconv.Itoa(len(flights))},
+			{Label: "Chats following one", Value: strconv.Itoa(len(chats))},
+		}}
+	}
+	srv := &http.Server{Addr: addr, Handler: rec.Handler(about), ReadHeaderTimeout: 5 * time.Second}
+	if err := srv.ListenAndServe(); err != nil {
+		log.Warn("bot stats stopped", "err", err)
+	}
 }

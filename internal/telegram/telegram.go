@@ -145,9 +145,12 @@ func (m Message) OpenURL() string {
 	return ""
 }
 
+// Chat is where a message came from. In a private chat it is the person, with their name.
 type Chat struct {
-	ID   int64  `json:"id"`
-	Type string `json:"type"`
+	ID        int64  `json:"id"`
+	Type      string `json:"type"`
+	FirstName string `json:"first_name"`
+	Username  string `json:"username"`
 }
 
 // Updates long-polls for new messages. Only a bot with a single reader may call it: Telegram

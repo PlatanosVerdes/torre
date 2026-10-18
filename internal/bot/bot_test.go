@@ -10,9 +10,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/PlatanosVerdes/gonana/botstats"
 	"github.com/PlatanosVerdes/torre/internal/aena"
+	"github.com/PlatanosVerdes/torre/internal/limit"
 	"github.com/PlatanosVerdes/torre/internal/telegram"
 	"github.com/PlatanosVerdes/torre/internal/watch"
+	"path/filepath"
 )
 
 type reply struct{ chat, text, open string }
@@ -150,5 +153,28 @@ func TestStopFollowingFromTheMessage(t *testing.T) {
 	b.Tap(context.Background(), tap(42, tr.StopData()))
 	if got := tg.answers[len(tg.answers)-1]; got != "You no longer follow this flight" {
 		t.Errorf("second tap answered %q", got)
+	}
+}
+
+func TestStatsCountWhoWritesAndWhatTheLimitTurnsAway(t *testing.T) {
+	b, tg := newBot(t)
+	rec, err := botstats.Open(filepath.Join(t.TempDir(), "stats.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	b.Stats = rec
+	b.perChat = limit.New(1, 2)
+
+	m := msg("/help")
+	m.Chat.FirstName, m.Chat.Username = "Ana", "ana"
+	for i := 0; i < 4; i++ {
+		b.Handle(context.Background(), m)
+	}
+	s := rec.Snapshot(botstats.About{})
+	if s.Users.Total != 1 || s.People[0].Name != "Ana" || s.People[0].Username != "ana" || s.People[0].Messages != 4 {
+		t.Errorf("people %+v", s.People)
+	}
+	if s.Traffic.Messages24h != 4 || s.Traffic.Rejected24h != 2 || len(tg.sent) != 2 {
+		t.Errorf("traffic %+v with %d replies, want 4 messages, 2 turned away, 2 answered", s.Traffic, len(tg.sent))
 	}
 }

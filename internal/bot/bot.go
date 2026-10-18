@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/PlatanosVerdes/gonana/botstats"
 	"github.com/PlatanosVerdes/torre/internal/limit"
 	"github.com/PlatanosVerdes/torre/internal/telegram"
 	"github.com/PlatanosVerdes/torre/internal/watch"
@@ -30,6 +31,8 @@ type Bot struct {
 	Watch   *watch.Watcher
 	BaseURL string
 	Log     *slog.Logger
+	// Stats, when set, counts who writes and what the rate limit turns away, for muninn.
+	Stats *botstats.Recorder
 
 	perChat *limit.Limiter
 }
@@ -93,7 +96,7 @@ func (b *Bot) Handle(ctx context.Context, m *telegram.Message) {
 		return
 	}
 	chat := strconv.FormatInt(m.Chat.ID, 10)
-	if b.perChat != nil && !b.perChat.Allow(chat) {
+	if !b.allow(chat, m.Chat) {
 		return
 	}
 
@@ -123,7 +126,7 @@ func (b *Bot) Handle(ctx context.Context, m *telegram.Message) {
 // the owner, so a forwarded message cannot remove someone else's flight.
 func (b *Bot) Tap(ctx context.Context, c *telegram.Callback) {
 	chat := strconv.FormatInt(c.Message.Chat.ID, 10)
-	if b.perChat != nil && !b.perChat.Allow(chat) {
+	if !b.allow(chat, c.Message.Chat) {
 		_ = b.TG.Answer(ctx, c.ID, "Too many taps, try again in a moment")
 		return
 	}
@@ -152,6 +155,21 @@ func (b *Bot) Tap(ctx context.Context, c *telegram.Callback) {
 	if err := b.TG.SetKeys(ctx, chat, c.Message.ID, telegram.Keys{Open: c.Message.OpenURL()}); err != nil {
 		b.Log.Warn("edit keys failed", "err", err)
 	}
+}
+
+// allow counts the update and applies the per-chat limit. Every update counts, the ones turned
+// away too: a flood shows up as traffic and as rejections, not as silence.
+func (b *Bot) allow(chat string, c telegram.Chat) bool {
+	if b.Stats != nil {
+		b.Stats.Message(chat, c.FirstName, c.Username)
+	}
+	if b.perChat != nil && !b.perChat.Allow(chat) {
+		if b.Stats != nil {
+			b.Stats.Rejected()
+		}
+		return false
+	}
+	return true
 }
 
 func (b *Bot) startFlight(arg string) (string, string) {

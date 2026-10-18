@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/PlatanosVerdes/gonana/botstats"
+	"github.com/PlatanosVerdes/torre/internal/adsbdb"
 	"github.com/PlatanosVerdes/torre/internal/aena"
 	"github.com/PlatanosVerdes/torre/internal/bot"
 	"github.com/PlatanosVerdes/torre/internal/server"
@@ -44,6 +45,7 @@ func run() error {
 		// Only for a bot torre has to itself: a shared bot already has its one reader of updates.
 		readBot   = env("TORRE_BOT_UPDATES", "") == "1"
 		aenaURL   = env("TORRE_AENA_URL", aena.DefaultBaseURL)
+		adsbdbURL = env("TORRE_ADSBDB_URL", adsbdb.DefaultBaseURL)
 		logAsJSON = env("TORRE_LOG_JSON", "") == "1"
 		// Lists names: never publish this address.
 		statsAddr = env("TORRE_STATS_ADDR", "")
@@ -89,7 +91,8 @@ func run() error {
 	watcher.StopButton = ownBot
 	go watcher.Run(ctx, every)
 	if ownBot {
-		b := &bot.Bot{TG: tg, Watch: watcher, BaseURL: publicURL, Version: buildVersion, Log: log}
+		b := &bot.Bot{TG: tg, Watch: watcher, BaseURL: publicURL, Version: buildVersion, Log: log,
+			Routes: adsbdb.New(adsbdbURL), Boards: client, Spanish: watcher.Spanish, Zone: client.Zone}
 		if statsAddr != "" {
 			rec, err := botstats.Open(filepath.Join(dataDir, "bot-stats.json"))
 			if err != nil {

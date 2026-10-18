@@ -72,6 +72,14 @@ func TestOpenButtonIsAMiniApp(t *testing.T) {
 	}
 }
 
+func TestChoicesAreTheirOwnRow(t *testing.T) {
+	got := Keys{Choices: []Choice{{"Follow this flight", "f:PMI:S:19102026:VY3919"}, {"No", "n"}}}.markup()
+	want := `{"inline_keyboard":[[{"callback_data":"f:PMI:S:19102026:VY3919","text":"Follow this flight"},{"callback_data":"n","text":"No"}]]}`
+	if got != want {
+		t.Errorf("markup %s", got)
+	}
+}
+
 // sign builds initData the way Telegram does, so the check is tested against the published algorithm.
 func sign(token string, values url.Values) string {
 	var lines []string

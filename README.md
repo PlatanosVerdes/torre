@@ -132,6 +132,14 @@ date if AENA never lists it again. Each chat can follow 10 at a time.
 | `/help` | What Torre does |
 | A photo or file | Boarding passes go through the page, so the booking reference stays on the phone |
 | **Stop following** under an alert | Stops following that flight and removes the button. Only from the chat that follows it |
+| `VY3919`, `vy 3919`, `VY3919 PMI` | The flight today and tomorrow, with **Follow this flight** (one button per date when both have it) and **No** |
+
+A flight number typed on its own (airline code, up to four digits, an optional letter and an optional
+airport) is looked up on one AENA board: with an airport, that airport's departures and then its
+arrivals; without one, the route comes from [adsbdb](https://www.adsbdb.com) (free, no key) and the
+board is the origin's departures when AENA runs it, else the destination's arrivals. adsbdb's route
+data may not be copied into another database, so torre asks it live and keeps answers only in memory
+for a few hours; when it does not know the number or is rate limiting, the bot asks for the airport.
 
 On start it also sets the chat menu button to open the page and publishes the command list. Groups are
 ignored, and each chat gets at most 20 answers a minute.
@@ -224,6 +232,7 @@ and MAD at once peaked at 107 MiB.
 | `TORRE_CLIENT_IP_HEADER` | | The header the proxy in front writes the visitor's address into |
 | `TORRE_LOG_JSON` | `1` in the image | JSON logs, which Vector collects |
 | `TORRE_AENA_URL` | `https://www.aena.es` | For tests |
+| `TORRE_ADSBDB_URL` | `https://api.adsbdb.com` | For tests |
 
 ## API
 

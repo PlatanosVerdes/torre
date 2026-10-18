@@ -1,5 +1,6 @@
 // Package bot answers torre's own Telegram bot: /start opens the page, /flights lists what the
-// chat follows. Following and boarding passes happen in the page, where the user can see them.
+// chat follows, and a flight number typed on its own offers to follow it. Boarding passes happen
+// in the page, so the booking reference stays on the phone.
 package bot
 
 import (
@@ -34,7 +35,14 @@ type Bot struct {
 	Log     *slog.Logger
 	Stats   *botstats.Recorder
 
+	// Routes, Boards and Spanish find a flight typed by its number; without Boards it is not looked up.
+	Routes  Routes
+	Boards  watch.Boards
+	Spanish func(code string) bool
+	Zone    *time.Location
+
 	perChat *limit.Limiter
+	now     func() time.Time
 }
 
 var commands = map[string]string{
@@ -49,6 +57,8 @@ var startParam = regexp.MustCompile(`^([A-Z]{3})_([SL])_(\d{2})(\d{2})(\d{4})_([
 const helpText = `Torre shows departures and arrivals for every AENA airport in Spain and tells you when a flight you follow changes time, gate or status.
 
 Tap <b>Open</b> to see a board, follow a flight, or add your boarding pass. The pass is read on your phone: your name and booking reference never leave it.
+
+Or send a flight number here, like <code>VY3919</code>, to follow it without opening the app.
 
 /flights lists what you follow.`
 
@@ -106,6 +116,8 @@ func (b *Bot) Handle(ctx context.Context, m *telegram.Message) {
 	command, arg, _ := strings.Cut(strings.TrimSpace(m.Text), " ")
 	command, _, _ = strings.Cut(command, "@")
 	var text, open string
+	var keys telegram.Keys
+	number, airport, isFlight := parseFlight(m.Text)
 	switch {
 	case command == "/start" && arg != "":
 		text, open = b.startFlight(arg)
@@ -117,20 +129,28 @@ func (b *Bot) Handle(ctx context.Context, m *telegram.Message) {
 		text, open = b.help(), b.BaseURL
 	case len(m.Photo) > 0 || m.Document != nil:
 		text, open = "Add boarding passes inside the app, with <b>Add boarding pass</b>. It is read on your phone, so your name and booking reference never reach the server.", b.BaseURL
+	case isFlight && b.Boards != nil:
+		text, keys = b.offer(ctx, number, airport)
 	default:
 		text, open = "Tap <b>Open</b> to search a flight, or send /help.", b.BaseURL
 	}
-	if err := b.TG.Send(ctx, chat, text, telegram.Keys{Open: open}); err != nil {
+	if open != "" {
+		keys.Open = open
+	}
+	if err := b.TG.Send(ctx, chat, text, keys); err != nil {
 		b.Log.Warn("reply failed", "err", err)
 	}
 }
 
 // Tap answers an inline button. "u:<flight>" stops following it; the chat the tap comes from is
-// the owner, so a forwarded message cannot remove someone else's flight.
+// the owner, so a forwarded message cannot remove someone else's flight. "f:" and "n" answer an offer.
 func (b *Bot) Tap(ctx context.Context, c *telegram.Callback) {
 	chat := strconv.FormatInt(c.Message.Chat.ID, 10)
 	if !b.allow(chat, c.Message.Chat) {
 		_ = b.TG.Answer(ctx, c.ID, "Too many taps, try again in a moment")
+		return
+	}
+	if b.follow(ctx, chat, c) {
 		return
 	}
 	rest, ok := strings.CutPrefix(c.Data, "u:")

@@ -18,7 +18,10 @@ import (
 	"path/filepath"
 )
 
-type reply struct{ chat, text, open string }
+type reply struct {
+	chat, text, open string
+	keys             telegram.Keys
+}
 
 type fakeTG struct {
 	sent     []reply
@@ -29,7 +32,7 @@ type fakeTG struct {
 func (f *fakeTG) Updates(context.Context, int64) ([]telegram.Update, error) { return nil, nil }
 func (f *fakeTG) Setup(context.Context, string, map[string]string) error    { return nil }
 func (f *fakeTG) Send(_ context.Context, chat, text string, keys telegram.Keys) error {
-	f.sent = append(f.sent, reply{chat, text, keys.Open})
+	f.sent = append(f.sent, reply{chat, text, keys.Open, keys})
 	return nil
 }
 func (f *fakeTG) Answer(_ context.Context, _, text string) error {

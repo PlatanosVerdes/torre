@@ -96,23 +96,23 @@ type Airport struct {
 // statuses maps AENA's codes to what the board shows. Departures and arrivals share some codes
 // (BOR is "finalizado" on both boards: gone from the gate, or passengers off the plane).
 var statuses = map[string]string{
-	"SCH": "Programado",
-	"INI": "En hora",
-	"HOR": "En hora",
-	"RET": "Retrasado",
-	"EMB": "Embarcando",
-	"ULL": "Última llamada",
-	"CER": "Puerta cerrada",
-	"BOR": "Finalizado",
-	"NPR": "Nueva puerta, retrasado",
-	"NPT": "Nueva puerta",
-	"CAN": "Cancelado",
-	"DES": "Desviado",
-	"DIV": "Desviado",
-	"FLY": "En vuelo",
-	"FNL": "Aproximación",
-	"LND": "Aterrizado",
-	"IBK": "Equipaje en cinta",
+	"SCH": "Scheduled",
+	"INI": "On time",
+	"HOR": "On time",
+	"RET": "Delayed",
+	"EMB": "Boarding",
+	"ULL": "Final call",
+	"CER": "Gate closed",
+	"BOR": "Departed",
+	"NPR": "New gate, delayed",
+	"NPT": "New gate",
+	"CAN": "Cancelled",
+	"DES": "Diverted",
+	"DIV": "Diverted",
+	"FLY": "In flight",
+	"FNL": "Landing",
+	"LND": "Landed",
+	"IBK": "Baggage on belt",
 }
 
 var finals = map[string]bool{"BOR": true, "CAN": true, "DES": true, "DIV": true, "IBK": true}
@@ -134,9 +134,21 @@ type Client struct {
 	boards   map[string]*entry
 	airports []Airport
 	airAt    time.Time
+	// fullSlot lets one two-week board decode at a time: each one is 18 MB of JSON for BCN and
+	// briefly costs ~50 MiB, so a burst of them is the one thing that could exhaust the container.
+	fullSlot chan struct{}
 }
 
+// How many boards stay cached. A short board is ~0.5 MB once normalized, a full one ~3 MB.
+const (
+	maxShort = 40
+	maxFull  = 4
+	// A failed fetch is remembered this long, so a down AENA is not asked again on every request.
+	failTTL = 10 * time.Second
+)
+
 type entry struct {
+	short   bool
 	at      time.Time
 	flights []Flight
 	err     error
@@ -149,11 +161,12 @@ func New(baseURL string, ttl time.Duration) *Client {
 		zone = time.UTC
 	}
 	return &Client{
-		BaseURL: baseURL,
-		HTTP:    &http.Client{Timeout: 60 * time.Second},
-		Zone:    zone,
-		TTL:     ttl,
-		boards:  map[string]*entry{},
+		BaseURL:  baseURL,
+		HTTP:     &http.Client{Timeout: 60 * time.Second},
+		Zone:     zone,
+		TTL:      ttl,
+		boards:   map[string]*entry{},
+		fullSlot: make(chan struct{}, 1),
 	}
 }
 
@@ -169,29 +182,75 @@ func (c *Client) Board(ctx context.Context, airport string, dir Direction, short
 	if e != nil {
 		select {
 		case <-e.ready:
-			if time.Since(e.at) < c.TTL && e.err == nil {
+			if e.err == nil && time.Since(e.at) < c.TTL {
 				c.mu.Unlock()
 				return e.flights, e.at, nil
+			}
+			if e.err != nil && time.Since(e.at) < failTTL {
+				c.mu.Unlock()
+				return nil, e.at, e.err
 			}
 		default:
 			c.mu.Unlock()
 			return wait(ctx, e)
 		}
 	}
-	e = &entry{ready: make(chan struct{})}
+	e = &entry{ready: make(chan struct{}), short: short}
 	c.boards[key] = e
 	c.mu.Unlock()
 
 	// Detached from the caller: an impatient phone must not cancel what others are waiting on.
-	fetchCtx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	fetchCtx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	if !short {
+		c.fullSlot <- struct{}{}
+	}
 	e.flights, e.err = c.fetch(fetchCtx, airport, dir, short)
+	if !short {
+		<-c.fullSlot
+	}
 	cancel()
+	c.mu.Lock()
 	e.at = time.Now()
 	close(e.ready)
+	c.evictLocked()
+	c.mu.Unlock()
 	if e.err != nil {
 		return nil, e.at, e.err
 	}
 	return e.flights, e.at, nil
+}
+
+// evictLocked drops stale boards and, past the caps, the oldest ones of each size.
+func (c *Client) evictLocked() {
+	var short, full []string
+	for k, e := range c.boards {
+		select {
+		case <-e.ready:
+		default:
+			continue
+		}
+		if time.Since(e.at) > 10*c.TTL {
+			delete(c.boards, k)
+			continue
+		}
+		if e.short {
+			short = append(short, k)
+		} else {
+			full = append(full, k)
+		}
+	}
+	for _, group := range []struct {
+		keys []string
+		max  int
+	}{{short, maxShort}, {full, maxFull}} {
+		if len(group.keys) <= group.max {
+			continue
+		}
+		sort.Slice(group.keys, func(i, j int) bool { return c.boards[group.keys[i]].at.Before(c.boards[group.keys[j]].at) })
+		for _, k := range group.keys[:len(group.keys)-group.max] {
+			delete(c.boards, k)
+		}
+	}
 }
 
 func wait(ctx context.Context, e *entry) ([]Flight, time.Time, error) {
@@ -367,6 +426,9 @@ func toFlight(r raw, dir Direction, zone *time.Location, now time.Time) Flight {
 		f.Terminal = ""
 	}
 	f.StatusLabel = StatusLabel(f.Status)
+	if f.Status == "BOR" && dir == Arrivals {
+		f.StatusLabel = "Arrived"
+	}
 	f.Final = finals[f.Status]
 
 	sched, okS := parse(f.Date, f.Scheduled, zone)
@@ -394,10 +456,36 @@ func toFlight(r raw, dir Direction, zone *time.Location, now time.Time) Flight {
 	// BOR at 10:35 for a 14:20 departure). Trusting it would hide the flight and stop the watch.
 	if f.Status == "BOR" && okS && expected.Sub(now) > 15*time.Minute {
 		f.Final = false
-		f.StatusLabel = "Finalizado (dudoso)"
+		f.StatusLabel = "Departed?"
 	}
 	return f
 }
+
+// Canonical writes a flight number one way: boarding passes pad it ("FR 02495", "IB0404" as
+// "IB 404") and AENA keeps its own zeros, so both sides are compared through this.
+func Canonical(number string) string {
+	n := strings.ToUpper(strings.ReplaceAll(number, " ", ""))
+	if len(n) < 3 {
+		return n
+	}
+	carrier, rest := n[:2], n[2:]
+	// A three-letter prefix is an ICAO code (VLG3906); IATA codes are two characters (FR, U2, 6E).
+	if len(n) > 3 && isLetter(n[0]) && isLetter(n[1]) && isLetter(n[2]) {
+		carrier, rest = n[:3], n[3:]
+	}
+	digits := strings.TrimRight(rest, "ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+	suffix := rest[len(digits):]
+	if digits == "" || strings.Trim(digits, "0123456789") != "" {
+		return n
+	}
+	digits = strings.TrimLeft(digits, "0")
+	if digits == "" {
+		digits = "0"
+	}
+	return carrier + digits + suffix
+}
+
+func isLetter(b byte) bool { return b >= 'A' && b <= 'Z' }
 
 func parse(date, hm string, zone *time.Location) (time.Time, bool) {
 	t, err := time.ParseInLocation("02/01/2006 15:04", date+" "+hm, zone)

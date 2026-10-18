@@ -70,7 +70,7 @@ func TestFinishedBeforeItsTimeIsNotTrusted(t *testing.T) {
 	if f.Final {
 		t.Error("a flight four hours from its new time was taken as finished")
 	}
-	if f.StatusLabel != "Finalizado (dudoso)" {
+	if f.StatusLabel != "Departed?" {
 		t.Errorf("label %q", f.StatusLabel)
 	}
 
@@ -93,7 +93,7 @@ func TestNullsAreEmpty(t *testing.T) {
 	r := row("2495", "FR", "FR,RYR,,FR,RYR,RYR", "12:20", "12:20", "INI")
 	r.Gate, r.Terminal = "null", "T2"
 	f := Normalize([]raw{r}, Departures, madrid, at("18/10/2026 10:00"))[0]
-	if f.Gate != "" || f.Estimated != "" || f.StatusLabel != "En hora" {
+	if f.Gate != "" || f.Estimated != "" || f.StatusLabel != "On time" {
 		t.Errorf("gate %q estimated %q label %q", f.Gate, f.Estimated, f.StatusLabel)
 	}
 }
@@ -133,5 +133,60 @@ func TestHTMLInsteadOfJSONIsAnError(t *testing.T) {
 	defer srv.Close()
 	if _, _, err := New(srv.URL, time.Minute).Board(context.Background(), "BCN", Departures, true); err == nil {
 		t.Error("an HTML page was accepted as a board")
+	}
+}
+
+func TestCanonical(t *testing.T) {
+	for in, want := range map[string]string{
+		"FR2495":   "FR2495",
+		"FR 02495": "FR2495",
+		"IB0404":   "IB404",
+		"IB 404":   "IB404",
+		"IB0404S":  "IB404S",
+		"U2 8010":  "U28010",
+		"VLG3906":  "VLG3906",
+		"vy3906":   "VY3906",
+		"6E0021":   "6E21",
+	} {
+		if got := Canonical(in); got != want {
+			t.Errorf("Canonical(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestCacheStaysBounded(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	defer srv.Close()
+	c := New(srv.URL, time.Minute)
+	for i := range maxShort + 10 {
+		code := string(rune('A'+i/26%26)) + string(rune('A'+i%26)) + "X"
+		_, _, _ = c.Board(context.Background(), code, Departures, true)
+	}
+	for i := range maxFull + 3 {
+		_, _, _ = c.Board(context.Background(), string(rune('A'+i))+"YY", Arrivals, false)
+	}
+	if n := len(c.boards); n > maxShort+maxFull {
+		t.Errorf("%d boards cached, cap is %d", n, maxShort+maxFull)
+	}
+}
+
+func TestFailuresAreNotRetriedOnEveryRequest(t *testing.T) {
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		http.Error(w, "down", http.StatusServiceUnavailable)
+	}))
+	defer srv.Close()
+	c := New(srv.URL, time.Minute)
+	for range 5 {
+		if _, _, err := c.Board(context.Background(), "BCN", Departures, true); err == nil {
+			t.Fatal("a failing AENA returned no error")
+		}
+	}
+	if n := hits.Load(); n != 1 {
+		t.Errorf("a down AENA was asked %d times in a row", n)
 	}
 }

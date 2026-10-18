@@ -33,7 +33,11 @@ func run() error {
 		dataDir   = env("TORRE_DATA_DIR", "./data")
 		ttl       = duration("TORRE_CACHE", 30*time.Second)
 		every     = duration("TORRE_CHECK_EVERY", 2*time.Minute)
-		bot       = telegram.New(env("TORRE_TELEGRAM_TOKEN", ""), env("TORRE_TELEGRAM_CHAT", ""))
+		bot       = telegram.New(env("TORRE_TELEGRAM_TOKEN", ""))
+		owner     = env("TORRE_OWNER_CHAT", "")
+		publicURL = env("TORRE_PUBLIC_URL", "")
+		ipHeader  = env("TORRE_CLIENT_IP_HEADER", "")
+		botName   = env("TORRE_BOT_NAME", "")
 		aenaURL   = env("TORRE_AENA_URL", aena.DefaultBaseURL)
 		logAsJSON = env("TORRE_LOG_JSON", "") == "1"
 	)
@@ -49,7 +53,7 @@ func run() error {
 	if logAsJSON {
 		log = slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	}
-	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+	if err := os.MkdirAll(dataDir, 0o700); err != nil {
 		return err
 	}
 
@@ -58,6 +62,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	watcher.BaseURL = publicURL
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -66,9 +71,15 @@ func run() error {
 	srv := &http.Server{
 		Addr: ":" + strconv.Itoa(port),
 		Handler: (&server.Server{
-			Board: client, Watch: watcher, Version: buildVersion, Log: log, Notify: bot.Enabled(),
+			Board: client, Watch: watcher, Bot: bot, Version: buildVersion, Log: log,
+			OwnerChat: owner, ClientIPHeader: ipHeader, BotName: botName,
 		}).Handler(),
-		ReadHeaderTimeout: 10 * time.Second,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		// A two-week board can take AENA a minute and a half.
+		WriteTimeout:   100 * time.Second,
+		IdleTimeout:    120 * time.Second,
+		MaxHeaderBytes: 16 << 10,
 	}
 	go func() {
 		<-ctx.Done()
@@ -77,7 +88,8 @@ func run() error {
 		_ = srv.Shutdown(shutdown)
 	}()
 
-	log.Info("torre listening", "version", buildVersion, "port", port, "telegram", bot.Enabled())
+	log.Info("torre listening", "version", buildVersion, "port", port,
+		"telegram", bot.Enabled(), "owner", owner != "", "public_url", publicURL)
 	if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}

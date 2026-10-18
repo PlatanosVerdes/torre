@@ -1,4 +1,4 @@
-// Package watch follows chosen flights and says what changed: time, gate, status, belt.
+// Package watch follows chosen flights for each chat and says what changed: time, gate, status, belt.
 package watch
 
 import (
@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -15,10 +16,13 @@ import (
 	"time"
 
 	"github.com/PlatanosVerdes/torre/internal/aena"
+	"github.com/PlatanosVerdes/torre/internal/telegram"
 )
 
+// Tracked is one flight followed by one chat. Last is nil while AENA has not published it yet.
 type Tracked struct {
 	ID        string         `json:"id"`
+	Chat      string         `json:"chat"`
 	Airport   string         `json:"airport"`
 	Direction aena.Direction `json:"direction"`
 	Date      string         `json:"date"`
@@ -33,8 +37,21 @@ type Boards interface {
 }
 
 type Notifier interface {
-	Notify(ctx context.Context, html string) error
+	Send(ctx context.Context, chat, html, open string) error
 }
+
+var (
+	ErrNotFound = errors.New("flight not found")
+	ErrTooMany  = errors.New("too many followed flights")
+)
+
+const (
+	// keepFinal is how long a landed or cancelled flight stays on the list before it is dropped.
+	keepFinal = 6 * time.Hour
+	// AENA publishes about two weeks ahead. A flight further out is kept as pending until it shows up.
+	published = 12 * 24 * time.Hour
+	maxAhead  = 330 * 24 * time.Hour
+)
 
 type Watcher struct {
 	path   string
@@ -44,21 +61,25 @@ type Watcher struct {
 	now    func() time.Time
 	zone   *time.Location
 
+	// BaseURL, when set, adds an "Open in Torre" button to every message.
+	BaseURL  string
+	MaxChat  int
+	MaxTotal int
+
 	mu      sync.Mutex
 	tracked []Tracked
 }
 
-// keepFinal is how long a landed or cancelled flight stays on the list before it is dropped.
-const keepFinal = 6 * time.Hour
-
 func New(dataDir string, boards Boards, notify Notifier, zone *time.Location, log *slog.Logger) (*Watcher, error) {
 	w := &Watcher{
-		path:   filepath.Join(dataDir, "tracked.json"),
-		boards: boards,
-		notify: notify,
-		log:    log,
-		now:    time.Now,
-		zone:   zone,
+		path:     filepath.Join(dataDir, "tracked.json"),
+		boards:   boards,
+		notify:   notify,
+		log:      log,
+		now:      time.Now,
+		zone:     zone,
+		MaxChat:  10,
+		MaxTotal: 5000,
 	}
 	raw, err := os.ReadFile(w.path)
 	if errors.Is(err, os.ErrNotExist) {
@@ -73,65 +94,95 @@ func New(dataDir string, boards Boards, notify Notifier, zone *time.Location, lo
 	return w, nil
 }
 
-func (w *Watcher) List() []Tracked {
+// List returns one chat's flights, or everyone's when chat is empty.
+func (w *Watcher) List(chat string) []Tracked {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	out := append([]Tracked{}, w.tracked...)
-	sort.Slice(out, func(i, j int) bool {
-		return sortKey(out[i]) < sortKey(out[j])
-	})
+	out := []Tracked{}
+	for _, t := range w.tracked {
+		if chat == "" || t.Chat == chat {
+			out = append(out, t)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return sortKey(out[i]) < sortKey(out[j]) })
 	return out
 }
 
-func sortKey(t Tracked) int64 {
-	if t.Last != nil {
-		return t.Last.Sort
+func sortKey(t Tracked) string {
+	key := t.Date
+	if d, err := time.Parse("02/01/2006", t.Date); err == nil {
+		key = d.Format("2006-01-02")
 	}
-	return t.Added.Unix()
+	if t.Last != nil {
+		key += t.Last.Scheduled
+	}
+	return key
 }
 
 // Add starts following a flight and sends its current state, so the chat confirms it took.
-func (w *Watcher) Add(ctx context.Context, airport string, dir aena.Direction, date, number string) (Tracked, error) {
-	airport, number = strings.ToUpper(airport), strings.ToUpper(strings.ReplaceAll(number, " ", ""))
+func (w *Watcher) Add(ctx context.Context, chat, airport string, dir aena.Direction, date, number string) (Tracked, error) {
+	airport, number = strings.ToUpper(airport), aena.Canonical(number)
+	day, err := time.ParseInLocation("02/01/2006", date, w.zone)
+	if err != nil {
+		return Tracked{}, errors.New("date must be dd/mm/yyyy")
+	}
+	now := w.now()
+
 	f, err := w.find(ctx, airport, dir, date, number)
 	if err != nil {
 		return Tracked{}, err
 	}
-	if f == nil {
-		return Tracked{}, fmt.Errorf("%s no aparece en %s el %s", number, airport, date)
+	if f == nil && (day.Sub(now) < published || day.Sub(now) > maxAhead) {
+		return Tracked{}, fmt.Errorf("%w: %s is not on AENA's %s board for %s", ErrNotFound, number, airport, date)
 	}
-	// Keyed by the operating flight, so following it by a codeshare number does not duplicate it.
-	id := strings.Join([]string{airport, string(dir), strings.ReplaceAll(date, "/", ""), f.Number}, "-")
+	if f != nil {
+		number = f.Number
+	}
+	t := Tracked{
+		ID:      strings.Join([]string{chat, airport, string(dir), strings.ReplaceAll(date, "/", ""), aena.Canonical(number)}, "-"),
+		Chat:    chat,
+		Airport: airport, Direction: dir, Date: date, Number: number,
+		Added: now, Last: f,
+	}
 
 	w.mu.Lock()
-	for _, t := range w.tracked {
-		if t.ID == id {
+	mine := 0
+	for _, o := range w.tracked {
+		if o.ID == t.ID {
 			w.mu.Unlock()
-			return t, nil
+			return o, nil
+		}
+		if o.Chat == chat {
+			mine++
 		}
 	}
-	w.mu.Unlock()
-
-	t := Tracked{ID: id, Airport: airport, Direction: dir, Date: date, Number: f.Number, Added: w.now(), Last: f}
-
-	w.mu.Lock()
+	if mine >= w.MaxChat || len(w.tracked) >= w.MaxTotal {
+		w.mu.Unlock()
+		return Tracked{}, fmt.Errorf("%w: up to %d at a time", ErrTooMany, w.MaxChat)
+	}
 	w.tracked = append(w.tracked, t)
 	err = w.saveLocked()
 	w.mu.Unlock()
 	if err != nil {
 		return Tracked{}, err
 	}
-	if err := w.notify.Notify(ctx, "Siguiendo "+Describe(*f)); err != nil {
+
+	if err := w.notify.Send(ctx, chat, "Following "+Describe(t), w.open(t)); err != nil {
+		// Following without being able to write is pointless, and the page says why.
+		if errors.Is(err, telegram.ErrBlocked) {
+			_ = w.Remove(chat, t.ID)
+			return Tracked{}, err
+		}
 		w.log.Warn("notify failed", "err", err)
 	}
 	return t, nil
 }
 
-func (w *Watcher) Remove(id string) error {
+func (w *Watcher) Remove(chat, id string) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	for i, t := range w.tracked {
-		if t.ID == id {
+		if t.ID == id && (chat == "" || t.Chat == chat) {
 			w.tracked = append(w.tracked[:i], w.tracked[i+1:]...)
 			return w.saveLocked()
 		}
@@ -154,7 +205,7 @@ func (w *Watcher) Run(ctx context.Context, every time.Duration) {
 
 // Check compares every tracked flight with the board and notifies each change.
 func (w *Watcher) Check(ctx context.Context) {
-	for _, t := range w.List() {
+	for _, t := range w.List("") {
 		f, err := w.find(ctx, t.Airport, t.Direction, t.Date, t.Number)
 		if err != nil {
 			w.log.Warn("board unavailable", "airport", t.Airport, "err", err)
@@ -165,31 +216,52 @@ func (w *Watcher) Check(ctx context.Context) {
 		if f == nil {
 			// AENA drops a flight a couple of hours after it is done.
 			if t.FinalAt != nil || w.past(t.Date, now) {
-				_ = w.Remove(t.ID)
+				_ = w.Remove("", t.ID)
 			}
 			continue
 		}
 
-		if t.Last != nil {
-			if changes := Diff(*t.Last, *f); len(changes) > 0 {
-				msg := Headline(*f) + "\n" + strings.Join(changes, "\n")
-				if err := w.notify.Notify(ctx, msg); err != nil {
-					w.log.Warn("notify failed", "flight", t.ID, "err", err)
-					// Keep the old state so the change is sent again next round.
+		var msg string
+		if t.Last == nil {
+			msg = "Now on AENA's board: " + Describe(Tracked{Number: f.Number, Last: f})
+		} else if changes := Diff(*t.Last, *f); len(changes) > 0 {
+			msg = Headline(*f) + "\n" + strings.Join(changes, "\n")
+		}
+		if msg != "" {
+			t.Last = f
+			if err := w.notify.Send(ctx, t.Chat, msg, w.open(t)); err != nil {
+				if errors.Is(err, telegram.ErrBlocked) {
+					// They blocked the bot; there is nobody left to tell.
+					_ = w.Remove("", t.ID)
 					continue
 				}
+				// The old state stays, so the change is sent again next round.
+				w.log.Warn("notify failed", "flight", t.ID, "err", err)
+				continue
 			}
 		}
+
 		t.Last = f
 		if f.Final && t.FinalAt == nil {
 			t.FinalAt = &now
 		}
 		if t.FinalAt != nil && now.Sub(*t.FinalAt) > keepFinal {
-			_ = w.Remove(t.ID)
+			_ = w.Remove("", t.ID)
 			continue
 		}
 		w.update(t)
 	}
+}
+
+func (w *Watcher) open(t Tracked) string {
+	if w.BaseURL == "" {
+		return ""
+	}
+	q := url.Values{"a": {t.Airport}, "d": {string(t.Direction)}, "f": {t.Number}}
+	if t.Last != nil {
+		q.Set("f", t.Last.ID)
+	}
+	return strings.TrimRight(w.BaseURL, "/") + "/?" + q.Encode()
 }
 
 func (w *Watcher) update(t Tracked) {
@@ -213,7 +285,12 @@ func (w *Watcher) past(date string, now time.Time) bool {
 }
 
 func (w *Watcher) find(ctx context.Context, airport string, dir aena.Direction, date, number string) (*aena.Flight, error) {
-	short := w.withinShort(date)
+	d, err := time.ParseInLocation("02/01/2006", date, w.zone)
+	if err == nil && d.Sub(w.now()) > published+48*time.Hour {
+		// Not even the two-week board reaches that far, so there is nothing to ask AENA yet.
+		return nil, nil
+	}
+	short := err != nil || d.Sub(w.now()) < 36*time.Hour
 	flights, _, err := w.boards.Board(ctx, airport, dir, short)
 	if err != nil {
 		return nil, err
@@ -221,28 +298,18 @@ func (w *Watcher) find(ctx context.Context, airport string, dir aena.Direction, 
 	return Find(flights, date, number), nil
 }
 
-// withinShort says whether AENA's two-day board covers the date, so the six-times-larger
-// fortnight board is only fetched for flights further out.
-func (w *Watcher) withinShort(date string) bool {
-	d, err := time.ParseInLocation("02/01/2006", date, w.zone)
-	if err != nil {
-		return true
-	}
-	return d.Sub(w.now()) < 36*time.Hour
-}
-
 func Find(flights []aena.Flight, date, number string) *aena.Flight {
-	number = strings.ToUpper(strings.ReplaceAll(number, " ", ""))
+	number = aena.Canonical(number)
 	for i := range flights {
 		f := &flights[i]
 		if f.Date != date {
 			continue
 		}
-		if f.Number == number {
+		if aena.Canonical(f.Number) == number {
 			return f
 		}
 		for _, c := range f.Codeshare {
-			if c == number {
+			if aena.Canonical(c) == number {
 				return f
 			}
 		}
@@ -256,7 +323,7 @@ func (w *Watcher) saveLocked() error {
 		return err
 	}
 	tmp := w.path + ".tmp"
-	if err := os.WriteFile(tmp, raw, 0o644); err != nil {
+	if err := os.WriteFile(tmp, raw, 0o600); err != nil {
 		return err
 	}
 	return os.Rename(tmp, w.path)
@@ -266,26 +333,26 @@ func (w *Watcher) saveLocked() error {
 func Diff(old, cur aena.Flight) []string {
 	var out []string
 	if old.Status != cur.Status {
-		out = append(out, "Estado: <b>"+esc(cur.StatusLabel)+"</b>")
+		out = append(out, "Status: <b>"+esc(cur.StatusLabel)+"</b>")
 	}
 	if Time(old) != Time(cur) {
-		line := fmt.Sprintf("Hora: %s → <b>%s</b>", Time(old), Time(cur))
+		line := fmt.Sprintf("Time: %s → <b>%s</b>", Time(old), Time(cur))
 		if cur.DelayMin != 0 {
 			line += fmt.Sprintf(" (%+d min)", cur.DelayMin)
 		}
 		out = append(out, line)
 	}
 	if old.Gate != cur.Gate {
-		out = append(out, fmt.Sprintf("Puerta: %s → <b>%s</b>", dash(old.Gate), dash(cur.Gate)))
+		out = append(out, fmt.Sprintf("Gate: %s → <b>%s</b>", dash(old.Gate), dash(cur.Gate)))
 	}
 	if old.Terminal != cur.Terminal {
 		out = append(out, fmt.Sprintf("Terminal: %s → <b>%s</b>", dash(old.Terminal), dash(cur.Terminal)))
 	}
 	if old.Belt != cur.Belt && cur.Belt != "" {
-		out = append(out, "Cinta de equipaje: <b>"+esc(cur.Belt)+"</b>")
+		out = append(out, "Baggage belt: <b>"+esc(cur.Belt)+"</b>")
 	}
 	if old.Counters != cur.Counters && cur.Counters != "" && cur.Direction == aena.Departures {
-		out = append(out, "Mostradores: "+esc(cur.Counters))
+		out = append(out, "Check-in desks: "+esc(cur.Counters))
 	}
 	return out
 }
@@ -310,25 +377,30 @@ func Headline(f aena.Flight) string {
 	return fmt.Sprintf("✈️ <b>%s</b> %s · %s", esc(f.Number), esc(route), esc(f.Date[:5]))
 }
 
-func Describe(f aena.Flight) string {
-	lines := []string{Headline(f), "Estado: <b>" + esc(f.StatusLabel) + "</b>"}
-	verb := "Sale"
+func Describe(t Tracked) string {
+	f := t.Last
+	if f == nil {
+		return fmt.Sprintf("✈️ <b>%s</b> %s · %s\nAENA publishes flights about two weeks ahead; you will get a message when it shows up.",
+			esc(t.Number), esc(t.Airport), esc(t.Date[:5]))
+	}
+	lines := []string{Headline(*f), "Status: <b>" + esc(f.StatusLabel) + "</b>"}
+	verb := "Departs"
 	if f.Direction == aena.Arrivals {
-		verb = "Llega"
+		verb = "Arrives"
 	}
 	when := verb + " " + f.Scheduled
 	if f.Estimated != "" {
-		when = fmt.Sprintf("%s %s, previsto <b>%s</b> (%+d min)", verb, f.Scheduled, Time(f), f.DelayMin)
+		when = fmt.Sprintf("%s %s, now expected <b>%s</b> (%+d min)", verb, f.Scheduled, Time(*f), f.DelayMin)
 	}
 	lines = append(lines, when)
 	if f.Terminal != "" {
 		lines = append(lines, "Terminal "+esc(f.Terminal))
 	}
 	if f.Gate != "" {
-		lines = append(lines, "Puerta <b>"+esc(f.Gate)+"</b>")
+		lines = append(lines, "Gate <b>"+esc(f.Gate)+"</b>")
 	}
 	if f.Belt != "" {
-		lines = append(lines, "Cinta "+esc(f.Belt))
+		lines = append(lines, "Belt "+esc(f.Belt))
 	}
 	return strings.Join(lines, "\n")
 }

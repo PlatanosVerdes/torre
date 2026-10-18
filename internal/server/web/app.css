@@ -1,0 +1,21 @@
+/* Design tokens shared by every component. They cross into shadow roots, and inside Telegram the
+   chat's theme replaces them (see js/telegram.js). */
+:root {
+  --bg: #f6f7f9; --card: #ffffff; --ink: #111827; --muted: #6b7280; --line: #e5e7eb;
+  --accent: #2563eb; --ok: #15803d; --warn: #c2410c; --bad: #b91c1c; --soft: #eef2f7;
+  --board: #111827; --board-ink: #f9fafb;
+  color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f1720; --card: #17212c; --ink: #e5e7eb; --muted: #94a3b8; --line: #243243;
+    --accent: #60a5fa; --ok: #4ade80; --warn: #fb923c; --bad: #f87171; --soft: #1d2a37;
+    --board: #0b1118; --board-ink: #f9fafb;
+  }
+}
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0; background: var(--bg); color: var(--ink); overflow-x: hidden;
+  font: 15px/1.35 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  padding-bottom: env(safe-area-inset-bottom);
+}

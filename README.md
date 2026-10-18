@@ -1,11 +1,11 @@
 # torre
 
-Departures and arrivals for every AENA airport, on a page made for the phone, and a Telegram message
-when a followed flight changes time, gate or status.
+Departures and arrivals for every AENA airport on a page made for the phone, a Telegram message when
+a followed flight changes time, gate or status, and a boarding pass reader that follows the flight
+on it.
 
-Runs on the Raspberry from [rpi-services](https://github.com/PlatanosVerdes/rpi-services) at
-`https://torre.platanosverdes.com`, reachable only inside the tailnet. Go, no dependencies, CalVer tag
-on every push to main.
+Runs on the Raspberry from [rpi-services](https://github.com/PlatanosVerdes/rpi-services). Go on the
+server, [Lit](https://lit.dev) components on the page, CalVer tag on every push to main.
 
 ## Where the data comes from
 
@@ -16,63 +16,123 @@ GET https://www.aena.es/sites/Satellite?pagename=AENA_ConsultarVuelos&airport=BC
 ```
 
 `flightType` is `S` (departures) or `L` (arrivals). `dosDias=si` is a two-day window, about 3 MB for
-Barcelona; without it AENA sends two weeks and six times as much, so the page only asks for that when
-"Ver más días" is pressed. No key, no login, no captcha.
+Barcelona; without it AENA sends two weeks, six times as much, in about 16 seconds, so the page only
+asks for that on "Show more days". No key, no login, no captcha.
 
 It is **not a published API**. The URL, the fields and the status codes were read from the page's
-JavaScript, and AENA can change any of them without notice. When that happens the board shows the
-error AENA returned, and an HTML page where JSON was expected is reported as such rather than parsed.
+JavaScript, and AENA can change any of them without notice. When it does, the page says AENA is not
+answering and the log has what AENA sent; an HTML page where JSON was expected is reported as such
+rather than parsed.
 
-It covers AENA airports only, which means Spain. A flight from London or Rome has no data here.
+It covers AENA airports only, which means Spain. A flight between two other countries has no data.
 
 ### What the service does with it
 
 - **Codeshares fold into one flight.** AENA lists a plane once per marketing carrier: VY3906, IB5126,
   QR3619 and LL5395 are one Vueling flight. The operating row is the one whose `codigosCompania`
   leaves its third field empty. Searching or following by any of the numbers finds the same flight.
-- **A 30-second cache per board**, shared by every phone and by the watcher, and concurrent requests
-  for the same board wait on one call to AENA. Under 10 seconds is refused at start-up.
-- **"Finished" before its time is not trusted.** AENA sometimes marks a departure `BOR` hours before
-  its new time (FR3070 on 18/10/2026: finished at 10:35, leaving at 14:20). Taken at face value that
-  hides the flight and stops the watch, so it shows as "Finalizado (dudoso)" until the time passes.
+- **Flight numbers are compared without padding.** Boarding passes write `FR 02495`, AENA writes
+  `IB0404`; both go through `aena.Canonical` (`FR2495`, `IB404`) before they are compared.
+- **"Departed" before its time is not trusted.** AENA sometimes marks a departure `BOR` hours before
+  its new time (FR3070 on 18/10/2026: departed at 10:35, leaving at 14:20). Taken at face value that
+  hides the flight and stops the watch, so it shows as "Departed?" until the time passes.
 
 ### Status codes
 
 | Code | Shown as | Board |
 | :--- | :--- | :--- |
-| `SCH` | Programado | both |
-| `INI`, `HOR` | En hora | both |
-| `RET` | Retrasado | both |
-| `EMB` | Embarcando | departures |
-| `ULL` | Última llamada | departures |
-| `CER` | Puerta cerrada | departures |
-| `NPR` / `NPT` | Nueva puerta, retrasado / Nueva puerta | departures |
-| `FLY` | En vuelo | arrivals |
-| `FNL` | Aproximación | arrivals |
-| `LND` | Aterrizado | arrivals |
-| `IBK` | Equipaje en cinta | arrivals |
-| `BOR` | Finalizado | both |
-| `CAN` | Cancelado | both |
+| `SCH` | Scheduled | both |
+| `INI`, `HOR` | On time | both |
+| `RET` | Delayed | both |
+| `EMB` | Boarding | departures |
+| `ULL` | Final call | departures |
+| `CER` | Gate closed | departures |
+| `NPR` / `NPT` | New gate, delayed / New gate | departures |
+| `FLY` | In flight | arrivals |
+| `FNL` | Landing | arrivals |
+| `LND` | Landed | arrivals |
+| `IBK` | Baggage on belt | arrivals |
+| `BOR` | Departed / Arrived | both |
+| `CAN` | Cancelled | both |
 
 An unknown code is shown as the raw code rather than hidden.
 
 ## Following a flight
 
-Tap a flight, then "Seguir". The service checks the board every `TORRE_CHECK_EVERY` and sends one
-message per change: status, time (with the delay), gate, terminal, belt, check-in desks. It sends the
-current state when you start following, so you know the chat is wired. A flight is dropped six hours
-after it departs, lands or is cancelled, or two days after its date if AENA never lists it again.
+Tap a flight, then "Follow". The service checks the board every `TORRE_CHECK_EVERY` and sends one
+message per change: status, time with the delay, gate, terminal, belt, check-in desks. It sends the
+current state when you start, so you know the chat is wired, and every message has an "Open in
+Torre" button that opens the flight inside Telegram.
 
-Messages go through @PlatanosServicesBot. This service only **sends**: wallapop-catalogue is the
-bot's single reader of updates, and Telegram answers a second reader with 409. Without
-`TORRE_TELEGRAM_TOKEN` the page still works and following only shows the flight at the top.
+A flight further out than AENA publishes (about two weeks) is kept as pending and announced when it
+appears. A flight is dropped six hours after it departs, lands or is cancelled, or two days after its
+date if AENA never lists it again. Each chat can follow 10 at a time.
+
+### Who is following
+
+- **Inside Telegram** (the Mini App, opened from a bot button), Telegram signs the launch data with
+  the bot's token and the page sends it with every request. The server checks that signature
+  (`telegram.Bot.User`) and keys the flights by the user's id, so each person sees and changes only
+  their own. Launch data older than 24 hours is refused.
+- **In a browser**, there is no identity. With `TORRE_OWNER_CHAT` set (a private deployment) the
+  browser follows for that chat; without it, the board is read-only and "Follow in Telegram" opens
+  the bot instead.
+
+The page reads Telegram's launch data from the URL fragment instead of loading
+`telegram.org/js/telegram-web-app.js`, so it still loads nothing from another origin.
+
+Telegram only lets a bot write to people who wrote to it first. If someone follows a flight without
+having pressed Start, the follow is refused with that explanation rather than kept silently.
+
+## Boarding passes
+
+"Add boarding pass" takes a photo or screenshot of the barcode, or an Apple Wallet `.pkpass`.
+
+The pass is decoded **on the phone** and only the flight is sent to the server. A boarding pass
+barcode (IATA BCBP, Resolution 792) also holds the passenger's name and the booking reference, and
+those two together open the booking at the airline, so neither leaves the page.
+
+- **Images** are read with [zxing-wasm](https://github.com/Sec-ant/zxing-wasm) (zxing-cpp compiled to
+  WebAssembly): Aztec, PDF417, QR and Data Matrix, which covers every airline's pass. It is ~1 MB, so
+  it loads on the first pass rather than with the page, and it is served from the Pi.
+- **Wallet passes** are a zip; the BCBP text is `pass.json`'s barcode message, unzipped in the page
+  with `DecompressionStream`. No image decoding involved.
+- **PDFs are not read.** Airlines draw the barcode in too many ways to turn a PDF into an image
+  reliably in the browser; a screenshot of it works.
+
+Each leg is matched to the AENA board that has it: departures at the origin when AENA runs it, else
+arrivals at the destination. The pass carries the day of the year but not the year, so the nearest
+date that is not in the past is taken.
+
+## Public deployment
+
+The page is meant to be public. What keeps it standing:
+
+| Measure | Where |
+| :--- | :--- |
+| No open ports at home: the public hostname goes through a Cloudflare Tunnel, which also absorbs floods before they reach the Pi | rpi-services, once the page goes public |
+| Per-address rate limits: 120 API requests a minute, 6 two-week boards a minute, 20 follows a minute | `internal/limit`, `server.Handler` |
+| The visitor's address comes from `TORRE_CLIENT_IP_HEADER` (`CF-Connecting-IP` behind Cloudflare), so the limits apply per visitor, not per proxy | `server.clientIP` |
+| Only AENA's 49 airports are accepted, so nobody can make the Pi ask AENA for made-up boards | `server.known` |
+| AENA is asked at most once per board every `TORRE_CACHE`, shared by every visitor and the watcher; a failure is remembered for 10 seconds | `aena.Client.Board` |
+| The cache holds at most 40 two-day and 4 two-week boards, and one two-week board decodes at a time (the heavy part, ~50 MiB) | `aena.Client` |
+| 10 followed flights per chat, 5,000 in total | `watch.Watcher` |
+| Request bodies capped at 8 KB, headers at 16 KB, read and write timeouts on the server | `main.go` |
+| AENA's error text goes to the log, never to the visitor | `server.upstream` |
+| Strict Content-Security-Policy (`default-src 'self'`, no inline script or style), `nosniff`, no referrer, no camera or location | `server.secure` |
+| Non-root user, read-only filesystem, no capabilities, `no-new-privileges`, a process limit and a memory limit | `Dockerfile`, compose |
+
+Memory: the usual two-day board keeps the process around 16 MiB; holding the two-week boards of BCN
+and MAD at once peaked at 107 MiB.
 
 ## Privacy
 
-Nothing about you leaves the Pi. AENA sees the Pi asking for an airport's whole board, never which
-flight you looked at. The page loads no third-party script, font or analytics, and stores the last
-airport in the phone's `localStorage`. The only file the service writes is the list of followed
-flights.
+- AENA sees the Pi asking for an airport's whole board, never which flight anyone looked at.
+- Boarding passes are read on the phone; the server receives route, flight number and date.
+- The server keeps the followed flights and the Telegram id of whoever follows each one, in
+  `tracked.json` (mode 600), and deletes both when the flight is done.
+- The page loads no third-party script, font or analytics, and stores the last airport in the
+  phone's `localStorage`.
 
 ## Configuration
 
@@ -82,29 +142,53 @@ flights.
 | `TORRE_DATA_DIR` | `./data` (`/data` in the image) | Holds `tracked.json` |
 | `TORRE_CACHE` | `30s` | How long a board is reused. 10s minimum |
 | `TORRE_CHECK_EVERY` | `2m` | How often followed flights are compared. 30s minimum |
-| `TORRE_TELEGRAM_TOKEN` | | The services bot's token |
-| `TORRE_TELEGRAM_CHAT` | | The chat to notify |
+| `TORRE_TELEGRAM_TOKEN` | | The bot that sends messages and signs Mini App launches |
+| `TORRE_OWNER_CHAT` | | Private deployments only: the chat a plain browser follows for. Leave empty when public |
+| `TORRE_PUBLIC_URL` | | The page's address, for the "Open in Torre" button. No button when empty |
+| `TORRE_BOT_NAME` | | The bot's username, for "Follow in Telegram" links from a browser |
+| `TORRE_CLIENT_IP_HEADER` | | The header the proxy in front writes the visitor's address into |
 | `TORRE_LOG_JSON` | `1` in the image | JSON logs, which Vector collects |
 | `TORRE_AENA_URL` | `https://www.aena.es` | For tests |
 
 ## API
 
-The page's own, documented here so it can be used from a shortcut or `curl`.
+The page's own, documented so it can be used from a shortcut or `curl`. Requests from the Mini App
+carry `X-Telegram-Init-Data`.
 
 | Request | Returns |
 | :--- | :--- |
 | `GET /api/board?airport=BCN&dir=S` | The board. `dir=L` for arrivals, `range=full` for two weeks |
 | `GET /api/airports` | AENA's airports |
-| `GET /api/tracked` | Followed flights, and whether Telegram is configured |
+| `GET /api/tracked` | Your followed flights, and whether you can follow from here |
 | `POST /api/tracked` | Follow `{"airport":"BCN","direction":"S","date":"18/10/2026","number":"FR2495"}` |
 | `DELETE /api/tracked/{id}` | Stop following |
 | `GET /healthz` | `ok <version>` |
 
-The page also opens a flight directly: `/?a=BCN&d=S&f=FR2495`.
+The page also opens a flight directly: `/?a=BCN&d=S&f=FR2495`, or inside Telegram with the start
+parameter `BCN_S_18102026_FR2495`.
+
+## Layout of the page
+
+```
+internal/server/web/
+  index.html, app.css        the shell and the colour tokens, nothing else
+  js/main.js                 builds the app
+  js/api.js                  Api: the JSON API above
+  js/telegram.js             TelegramWebApp: launch data, theme, start parameter
+  js/boarding-pass.js        BoardingPass: barcode and Wallet reading, BCBP parsing
+  js/format.js, styles.js    how a flight reads and looks, shared by every component
+  js/components/             torre-app, flight-row, flight-details, pass-legs, torre-sheet
+  vendor/                    Lit and zxing-wasm, pinned by version in the file name, with licences
+```
+
+Lit and zxing-wasm are vendored rather than loaded from a CDN, so the page has no third-party
+origins and the Content-Security-Policy can say `'self'`. Lit is one ES module bundled from npm with
+esbuild (`export * from 'lit'` plus the `repeat` and `classMap` directives); to update it, bundle the
+new version the same way and change the file name.
 
 ## Development
 
 ```bash
 go test ./...
-TORRE_PORT=8765 go run ./cmd/torre   # http://localhost:8765
+TORRE_PORT=8765 TORRE_OWNER_CHAT=1 go run ./cmd/torre   # http://localhost:8765
 ```

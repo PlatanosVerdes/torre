@@ -177,7 +177,7 @@ internal/server/web/
   js/telegram.js             TelegramWebApp: launch data, theme, start parameter
   js/boarding-pass.js        BoardingPass: barcode and Wallet reading, BCBP parsing
   js/format.js, styles.js    how a flight reads and looks, shared by every component
-  js/components/             torre-app, flight-row, flight-details, pass-legs, torre-sheet
+  js/components/             torre-app, airport-picker, flight-row, flight-details, pass-legs, torre-sheet
   vendor/                    Lit and zxing-wasm, pinned by version in the file name, with licences
 ```
 

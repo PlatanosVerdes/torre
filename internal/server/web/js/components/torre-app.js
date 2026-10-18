@@ -7,6 +7,7 @@ import './flight-row.js';
 import './torre-sheet.js';
 import './flight-details.js';
 import './pass-legs.js';
+import './airport-picker.js';
 
 const store = {
   get(k, d) { try { return localStorage.getItem(k) ?? d; } catch { return d; } },
@@ -48,10 +49,9 @@ export class TorreApp extends LitElement {
     }
     .row { display: flex; gap: 8px; align-items: center; }
     h1 { font-size: 20px; margin: 0; letter-spacing: -0.02em; }
-    select, input[type=search], .tool {
+    input[type=search], .tool {
       font: inherit; color: var(--ink); background: var(--card); border: 1px solid var(--line); border-radius: 10px;
     }
-    select { flex: 1; min-width: 0; width: 100%; font-weight: 600; padding: 9px 10px; }
     input[type=search] { width: 100%; margin-top: 8px; font-size: 16px; padding: 9px 12px; }
     .tool { width: 100%; margin-top: 8px; font-size: 14px; font-weight: 600; padding: 8px 10px; cursor: pointer; }
     .seg { display: flex; background: var(--soft); border-radius: 10px; padding: 3px; margin-top: 8px; }
@@ -278,11 +278,8 @@ export class TorreApp extends LitElement {
       <header>
         <div class="row">
           <h1>Torre</h1>
-          <select aria-label="Airport" @change=${e => this.#setAirport(e.target.value)}>
-            ${this.airports.length
-              ? this.airports.map(a => html`<option value=${a.iata} ?selected=${a.iata === this.airport}>${a.iata} · ${a.name}</option>`)
-              : html`<option>${this.airport}</option>`}
-          </select>
+          <airport-picker .airports=${this.airports} .value=${this.airport}
+            @airport-change=${e => this.#setAirport(e.detail.iata)}></airport-picker>
         </div>
         <div class="seg" role="group" aria-label="Board">
           <button aria-pressed=${this.dir === 'S'} @click=${() => this.#setDir('S')}>Departures</button>

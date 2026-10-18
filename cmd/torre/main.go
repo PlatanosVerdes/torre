@@ -69,8 +69,10 @@ func run() error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	ownBot := readBot && tg.Enabled() && publicURL != ""
+	watcher.StopButton = ownBot
 	go watcher.Run(ctx, every)
-	if readBot && tg.Enabled() && publicURL != "" {
+	if ownBot {
 		go (&bot.Bot{TG: tg, Watch: watcher, BaseURL: publicURL, Log: log}).Run(ctx)
 	}
 

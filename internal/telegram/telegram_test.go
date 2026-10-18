@@ -3,6 +3,7 @@ package telegram
 import (
 	"context"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -15,7 +16,7 @@ import (
 )
 
 func TestNothingIsSentWithoutAToken(t *testing.T) {
-	if err := New("").Send(context.Background(), "1", "hola", ""); err != nil {
+	if err := New("").Send(context.Background(), "1", "hola", Keys{}); err != nil {
 		t.Errorf("an unconfigured bot returned an error instead of staying quiet: %v", err)
 	}
 }
@@ -26,13 +27,13 @@ func TestErrorsDoNotCarryTheToken(t *testing.T) {
 	}))
 	bot := New("secret-token")
 	bot.APIURL = srv.URL + "/bot"
-	err := bot.Send(context.Background(), "1", "hola", "")
+	err := bot.Send(context.Background(), "1", "hola", Keys{})
 	srv.Close()
 	if err == nil || strings.Contains(err.Error(), "secret-token") {
 		t.Fatalf("answered error: %v", err)
 	}
 
-	err = bot.Send(context.Background(), "1", "hola", "")
+	err = bot.Send(context.Background(), "1", "hola", Keys{})
 	if err == nil || strings.Contains(err.Error(), "secret-token") {
 		t.Fatalf("transport error: %v", err)
 	}
@@ -45,7 +46,7 @@ func TestForbiddenMeansNotStarted(t *testing.T) {
 	defer srv.Close()
 	bot := New("t")
 	bot.APIURL = srv.URL + "/bot"
-	if err := bot.Send(context.Background(), "1", "hola", ""); !errors.Is(err, ErrBlocked) {
+	if err := bot.Send(context.Background(), "1", "hola", Keys{}); !errors.Is(err, ErrBlocked) {
 		t.Errorf("got %v, want ErrBlocked", err)
 	}
 }
@@ -59,9 +60,15 @@ func TestOpenButtonIsAMiniApp(t *testing.T) {
 	defer srv.Close()
 	bot := New("t")
 	bot.APIURL = srv.URL + "/bot"
-	_ = bot.Send(context.Background(), "1", "hola", "https://torre.example/?f=FR1")
-	if !strings.Contains(markup, `"web_app":{"url":"https://torre.example/?f=FR1"}`) {
+	_ = bot.Send(context.Background(), "1", "hola", Keys{Open: "https://torre.example/?f=FR1", Stop: "u:BCN"})
+	if !strings.Contains(markup, `"web_app":{"url":"https://torre.example/?f=FR1"}`) || !strings.Contains(markup, `"callback_data":"u:BCN"`) {
 		t.Errorf("markup %s", markup)
+	}
+
+	var m Message
+	_ = json.Unmarshal([]byte(`{"message_id":5,"reply_markup":`+markup+`}`), &m)
+	if m.OpenURL() != "https://torre.example/?f=FR1" {
+		t.Errorf("open url read back as %q", m.OpenURL())
 	}
 }
 

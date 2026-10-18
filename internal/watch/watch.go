@@ -29,7 +29,16 @@ type Tracked struct {
 	Number    string         `json:"number"`
 	Added     time.Time      `json:"added"`
 	Last      *aena.Flight   `json:"last,omitempty"`
-	FinalAt   *time.Time     `json:"finalAt,omitempty"`
+	// Notified is the state the chat was last told about. Changes are measured from it, not from
+	// Last, so a time creeping a minute per check still adds up to a message.
+	Notified *aena.Flight `json:"notified,omitempty"`
+	FinalAt  *time.Time   `json:"finalAt,omitempty"`
+}
+
+// StopData is the callback data of a message's "Stop following" button. The chat is left out:
+// the tap arrives from that chat, which is also what proves the flight is theirs.
+func (t Tracked) StopData() string {
+	return "u:" + strings.TrimPrefix(t.ID, t.Chat+"-")
 }
 
 type Boards interface {
@@ -37,7 +46,7 @@ type Boards interface {
 }
 
 type Notifier interface {
-	Send(ctx context.Context, chat, html, open string) error
+	Send(ctx context.Context, chat, html string, keys telegram.Keys) error
 }
 
 var (
@@ -62,9 +71,12 @@ type Watcher struct {
 	zone   *time.Location
 
 	// BaseURL, when set, adds an "Open in Torre" button to every message.
-	BaseURL  string
-	MaxChat  int
-	MaxTotal int
+	BaseURL string
+	// StopButton adds "Stop following" to every message. Only for a bot whose updates torre reads,
+	// or the taps go nowhere.
+	StopButton bool
+	MaxChat    int
+	MaxTotal   int
 
 	mu      sync.Mutex
 	tracked []Tracked
@@ -142,7 +154,7 @@ func (w *Watcher) Add(ctx context.Context, chat, airport string, dir aena.Direct
 		ID:      strings.Join([]string{chat, airport, string(dir), strings.ReplaceAll(date, "/", ""), aena.Canonical(number)}, "-"),
 		Chat:    chat,
 		Airport: airport, Direction: dir, Date: date, Number: number,
-		Added: now, Last: f,
+		Added: now, Last: f, Notified: f,
 	}
 
 	w.mu.Lock()
@@ -167,7 +179,7 @@ func (w *Watcher) Add(ctx context.Context, chat, airport string, dir aena.Direct
 		return Tracked{}, err
 	}
 
-	if err := w.notify.Send(ctx, chat, "Following "+Describe(t), w.open(t)); err != nil {
+	if err := w.notify.Send(ctx, chat, "Following "+Describe(t), w.keys(t)); err != nil {
 		// Following without being able to write is pointless, and the page says why.
 		if errors.Is(err, telegram.ErrBlocked) {
 			_ = w.Remove(chat, t.ID)
@@ -221,15 +233,19 @@ func (w *Watcher) Check(ctx context.Context) {
 			continue
 		}
 
+		told := t.Notified
+		if told == nil {
+			told = t.Last
+		}
 		var msg string
-		if t.Last == nil {
+		if told == nil {
 			msg = "Now on AENA's board: " + Describe(Tracked{Number: f.Number, Last: f})
-		} else if changes := Diff(*t.Last, *f); len(changes) > 0 {
+		} else if changes := Diff(*told, *f); len(changes) > 0 {
 			msg = Headline(*f) + "\n" + strings.Join(changes, "\n")
 		}
 		if msg != "" {
 			t.Last = f
-			if err := w.notify.Send(ctx, t.Chat, msg, w.open(t)); err != nil {
+			if err := w.notify.Send(ctx, t.Chat, msg, w.keys(t)); err != nil {
 				if errors.Is(err, telegram.ErrBlocked) {
 					// They blocked the bot; there is nobody left to tell.
 					_ = w.Remove("", t.ID)
@@ -239,6 +255,7 @@ func (w *Watcher) Check(ctx context.Context) {
 				w.log.Warn("notify failed", "flight", t.ID, "err", err)
 				continue
 			}
+			t.Notified = f
 		}
 
 		t.Last = f
@@ -251,6 +268,14 @@ func (w *Watcher) Check(ctx context.Context) {
 		}
 		w.update(t)
 	}
+}
+
+func (w *Watcher) keys(t Tracked) telegram.Keys {
+	k := telegram.Keys{Open: w.open(t)}
+	if w.StopButton {
+		k.Stop = t.StopData()
+	}
+	return k
 }
 
 func (w *Watcher) open(t Tracked) string {
@@ -329,13 +354,17 @@ func (w *Watcher) saveLocked() error {
 	return os.Rename(tmp, w.path)
 }
 
+// minTimeChange is the smallest move of the expected time worth a message. AENA's estimates
+// wobble by a minute (FR3070: 15:06, 15:07, 15:06 within six minutes).
+const minTimeChange = 5
+
 // Diff lists what a traveller would want to hear about, in the order they would act on it.
 func Diff(old, cur aena.Flight) []string {
 	var out []string
 	if old.Status != cur.Status {
 		out = append(out, "Status: <b>"+esc(cur.StatusLabel)+"</b>")
 	}
-	if Time(old) != Time(cur) {
+	if moved := cur.DelayMin - old.DelayMin; moved >= minTimeChange || moved <= -minTimeChange || old.EstimatedDate != cur.EstimatedDate {
 		line := fmt.Sprintf("Time: %s → <b>%s</b>", Time(old), Time(cur))
 		if cur.DelayMin != 0 {
 			line += fmt.Sprintf(" (%+d min)", cur.DelayMin)

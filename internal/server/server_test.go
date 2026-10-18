@@ -40,7 +40,7 @@ func (fakeBoard) Airports(context.Context) ([]aena.Airport, error) {
 
 type quiet struct{}
 
-func (quiet) Send(context.Context, string, string, string) error { return nil }
+func (quiet) Send(context.Context, string, string, telegram.Keys) error { return nil }
 
 const token = "123:secret"
 

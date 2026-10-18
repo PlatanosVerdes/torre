@@ -22,18 +22,21 @@ func (b *fakeBoards) Board(context.Context, string, aena.Direction, bool) ([]aen
 	return b.flights, time.Now(), nil
 }
 
-type sent struct{ chat, text, open string }
+type sent struct {
+	chat, text string
+	keys       telegram.Keys
+}
 
 type inbox struct {
 	msgs    []sent
 	blocked map[string]bool
 }
 
-func (i *inbox) Send(_ context.Context, chat, text, open string) error {
+func (i *inbox) Send(_ context.Context, chat, text string, keys telegram.Keys) error {
 	if i.blocked[chat] {
 		return telegram.ErrBlocked
 	}
-	i.msgs = append(i.msgs, sent{chat, text, open})
+	i.msgs = append(i.msgs, sent{chat, text, keys})
 	return nil
 }
 
@@ -71,8 +74,11 @@ func TestFollowNotifiesEachChangeOnce(t *testing.T) {
 	if len(n.msgs) != 1 || !strings.HasPrefix(n.msgs[0].text, "Following") || n.msgs[0].chat != "42" {
 		t.Fatalf("no confirmation sent to the chat: %+v", n.msgs)
 	}
-	if !strings.Contains(n.msgs[0].open, "f=18%2F10%2F2026-FR2495") {
-		t.Errorf("open button points to %q", n.msgs[0].open)
+	if !strings.Contains(n.msgs[0].keys.Open, "f=18%2F10%2F2026-FR2495") {
+		t.Errorf("open button points to %q", n.msgs[0].keys.Open)
+	}
+	if n.msgs[0].keys.Stop != "" {
+		t.Error("a stop button without StopButton set")
 	}
 
 	w.Check(context.Background())
@@ -251,5 +257,50 @@ func TestNamesInMessagesAreEscaped(t *testing.T) {
 	f.Other = "<b>"
 	if strings.Contains(Headline(f), "<b><b>") || !strings.Contains(Headline(f), "&lt;b&gt;") {
 		t.Errorf("headline not escaped: %s", Headline(f))
+	}
+}
+
+func TestOneMinuteWobbleIsNotNews(t *testing.T) {
+	b := &fakeBoards{flights: []aena.Flight{flight()}}
+	n := &inbox{}
+	w := newWatcher(t, b, n, morning)
+	if _, err := w.Add(context.Background(), "1", "BCN", aena.Departures, "18/10/2026", "FR2495"); err != nil {
+		t.Fatal(err)
+	}
+	for _, est := range []struct {
+		time  string
+		delay int
+	}{{"12:21", 1}, {"12:20", 0}, {"12:22", 2}, {"12:24", 4}} {
+		f := flight()
+		f.Estimated, f.DelayMin = est.time, est.delay
+		b.flights = []aena.Flight{f}
+		w.Check(context.Background())
+	}
+	if len(n.msgs) != 1 {
+		t.Fatalf("a time within four minutes of the last message sent %d messages", len(n.msgs)-1)
+	}
+
+	f := flight()
+	f.Estimated, f.DelayMin = "12:26", 6
+	b.flights = []aena.Flight{f}
+	w.Check(context.Background())
+	if len(n.msgs) != 2 || !strings.Contains(n.msgs[1].text, "12:20 → <b>12:26</b>") {
+		t.Fatalf("minutes that added up to six were not sent from the last told time: %+v", n.msgs)
+	}
+}
+
+func TestStopButton(t *testing.T) {
+	n := &inbox{}
+	w := newWatcher(t, &fakeBoards{flights: []aena.Flight{flight()}}, n, morning)
+	w.StopButton = true
+	tr, err := w.Add(context.Background(), "42", "BCN", aena.Departures, "18/10/2026", "FR2495")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := n.msgs[0].keys.Stop; got != "u:BCN-S-18102026-FR2495" || len(got) > 64 {
+		t.Errorf("stop data %q", got)
+	}
+	if "42-"+strings.TrimPrefix(tr.StopData(), "u:") != tr.ID {
+		t.Error("the stop data does not lead back to the flight's id")
 	}
 }

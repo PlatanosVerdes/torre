@@ -82,7 +82,9 @@ An unknown code is shown as the raw code rather than hidden.
 ## Following a flight
 
 Tap a flight, then "Follow". The service checks the board every `TORRE_CHECK_EVERY` and sends one
-message per change: status, time with the delay, gate, terminal, belt, check-in desks. It sends the
+message per change: status, time with the delay, gate, terminal, belt, check-in desks. The time is
+only news once it moves five minutes from what the chat was last told: AENA's estimates wobble by a
+minute, and a time creeping a minute per check still adds up to a message. It sends the
 current state when you start, so you know the chat is wired, and every message has an "Open in
 Torre" button that opens the flight inside Telegram.
 
@@ -102,6 +104,7 @@ date if AENA never lists it again. Each chat can follow 10 at a time.
 | `/flights` | The flights the chat follows and their state |
 | `/help` | What Torre does |
 | A photo or file | Boarding passes go through the page, so the booking reference stays on the phone |
+| **Stop following** under an alert | Stops following that flight and removes the button. Only from the chat that follows it |
 
 On start it also sets the chat menu button to open the page and publishes the command list. Groups are
 ignored, and each chat gets at most 20 answers a minute.

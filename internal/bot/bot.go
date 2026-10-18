@@ -20,7 +20,9 @@ import (
 type Telegram interface {
 	Updates(ctx context.Context, offset int64) ([]telegram.Update, error)
 	Setup(ctx context.Context, open string, commands map[string]string) error
-	Send(ctx context.Context, chat, html, open string) error
+	Send(ctx context.Context, chat, html string, keys telegram.Keys) error
+	Answer(ctx context.Context, callbackID, text string) error
+	SetKeys(ctx context.Context, chat string, messageID int64, keys telegram.Keys) error
 }
 
 type Bot struct {
@@ -77,6 +79,9 @@ func (b *Bot) Run(ctx context.Context) {
 			if u.Message != nil {
 				b.Handle(ctx, u.Message)
 			}
+			if u.Callback != nil {
+				b.Tap(ctx, u.Callback)
+			}
 		}
 	}
 }
@@ -109,8 +114,43 @@ func (b *Bot) Handle(ctx context.Context, m *telegram.Message) {
 	default:
 		text, open = "Tap <b>Open</b> to search a flight, or send /help.", b.BaseURL
 	}
-	if err := b.TG.Send(ctx, chat, text, open); err != nil {
+	if err := b.TG.Send(ctx, chat, text, telegram.Keys{Open: open}); err != nil {
 		b.Log.Warn("reply failed", "err", err)
+	}
+}
+
+// Tap answers an inline button. "u:<flight>" stops following it; the chat the tap comes from is
+// the owner, so a forwarded message cannot remove someone else's flight.
+func (b *Bot) Tap(ctx context.Context, c *telegram.Callback) {
+	chat := strconv.FormatInt(c.Message.Chat.ID, 10)
+	if b.perChat != nil && !b.perChat.Allow(chat) {
+		_ = b.TG.Answer(ctx, c.ID, "Too many taps, try again in a moment")
+		return
+	}
+	rest, ok := strings.CutPrefix(c.Data, "u:")
+	if !ok {
+		_ = b.TG.Answer(ctx, c.ID, "")
+		return
+	}
+
+	id := chat + "-" + rest
+	notice := "You no longer follow this flight"
+	for _, t := range b.Watch.List(chat) {
+		if t.ID == id {
+			if err := b.Watch.Remove(chat, id); err != nil {
+				b.Log.Warn("unfollow failed", "err", err)
+				_ = b.TG.Answer(ctx, c.ID, "Could not stop following it, try again")
+				return
+			}
+			notice = "Stopped following " + t.Number
+		}
+	}
+	if err := b.TG.Answer(ctx, c.ID, notice); err != nil {
+		b.Log.Warn("answer failed", "err", err)
+	}
+	// Keep "Open in Torre", drop the button that no longer does anything.
+	if err := b.TG.SetKeys(ctx, chat, c.Message.ID, telegram.Keys{Open: c.Message.OpenURL()}); err != nil {
+		b.Log.Warn("edit keys failed", "err", err)
 	}
 }
 

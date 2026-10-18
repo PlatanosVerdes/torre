@@ -84,12 +84,12 @@ type Flight struct {
 	StatusLabel   string `json:"statusLabel"`
 	Final         bool   `json:"final"`
 	// Doubtful marks a status AENA gave that its own times contradict.
-	Doubtful bool `json:"doubtful,omitempty"`
-	Terminal      string `json:"terminal,omitempty"`
-	Gate          string `json:"gate,omitempty"`
-	Counters      string `json:"counters,omitempty"`
-	Belt          string `json:"belt,omitempty"`
-	Aircraft      string `json:"aircraft,omitempty"`
+	Doubtful bool   `json:"doubtful,omitempty"`
+	Terminal string `json:"terminal,omitempty"`
+	Gate     string `json:"gate,omitempty"`
+	Counters string `json:"counters,omitempty"`
+	Belt     string `json:"belt,omitempty"`
+	Aircraft string `json:"aircraft,omitempty"`
 	// Sort is the scheduled time as Unix seconds in the airport's zone, for ordering only.
 	Sort int64 `json:"sort"`
 }

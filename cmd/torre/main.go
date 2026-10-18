@@ -89,7 +89,7 @@ func run() error {
 	watcher.StopButton = ownBot
 	go watcher.Run(ctx, every)
 	if ownBot {
-		b := &bot.Bot{TG: tg, Watch: watcher, BaseURL: publicURL, Log: log}
+		b := &bot.Bot{TG: tg, Watch: watcher, BaseURL: publicURL, Version: buildVersion, Log: log}
 		if statsAddr != "" {
 			rec, err := botstats.Open(filepath.Join(dataDir, "bot-stats.json"))
 			if err != nil {

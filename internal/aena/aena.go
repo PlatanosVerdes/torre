@@ -465,7 +465,7 @@ func toFlight(r raw, dir Direction, zone *time.Location, now time.Time) Flight {
 	// BOR at 10:35 for a 14:20 departure). Trusting it would hide the flight and stop the watch.
 	if f.Status == "BOR" && okS && expected.Sub(now) > 15*time.Minute {
 		f.Final = false
-		f.StatusLabel = "Departed?"
+		f.StatusLabel = "Unconfirmed"
 	}
 	return f
 }

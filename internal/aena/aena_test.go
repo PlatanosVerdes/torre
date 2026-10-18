@@ -70,7 +70,7 @@ func TestFinishedBeforeItsTimeIsNotTrusted(t *testing.T) {
 	if f.Final {
 		t.Error("a flight four hours from its new time was taken as finished")
 	}
-	if f.StatusLabel != "Departed?" {
+	if f.StatusLabel != "Unconfirmed" {
 		t.Errorf("label %q", f.StatusLabel)
 	}
 

@@ -25,6 +25,7 @@ export class FlightDetails extends LitElement {
     small { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; opacity: .6; }
     b { font-size: 22px; font-family: ui-monospace, "SF Mono", Menlo, monospace; letter-spacing: .02em; }
     .wide { grid-column: 1 / -1; }
+    .warn { color: var(--warn); margin-top: -4px; }
   `];
 
   render() {
@@ -47,6 +48,7 @@ export class FlightDetails extends LitElement {
         ${route} · ${f.airline} · ${dayLabel(f.date)}${f.aircraft ? ` · ${f.aircraft}` : ''}
         ${f.codeshare?.length ? html`<br>Also sold as ${f.codeshare.join(', ')}` : ''}
       </p>
+      ${f.status === 'BOR' && !f.final ? html`<p class="warn">AENA lists it as departed, but its new time has not come yet. Check with the airline.</p>` : ''}
       <div class="board">
         ${cells.map((c, i) => html`
           <div class=${i === cells.length - 1 && cells.length % 2 ? 'wide' : ''}><small>${c[0]}</small><b>${c[1]}</b></div>`)}

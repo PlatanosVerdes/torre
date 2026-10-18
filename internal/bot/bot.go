@@ -31,7 +31,7 @@ type Bot struct {
 	Watch   *watch.Watcher
 	BaseURL string
 	Log     *slog.Logger
-	Stats *botstats.Recorder
+	Stats   *botstats.Recorder
 
 	perChat *limit.Limiter
 }

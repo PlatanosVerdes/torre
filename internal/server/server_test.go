@@ -198,3 +198,27 @@ func TestClientIPHeaderSeparatesVisitors(t *testing.T) {
 		t.Errorf("a second visitor behind the same proxy was limited: %d", rec.Code)
 	}
 }
+
+func TestAssetsAreVersioned(t *testing.T) {
+	h := newServer(t, "").Handler()
+	rec := do(h, "GET", "/", "")
+	if rec.Header().Get("Cache-Control") != "no-store" {
+		t.Errorf("index cache-control %q", rec.Header().Get("Cache-Control"))
+	}
+	body := rec.Body.String()
+	i := strings.Index(body, `src="/static/`)
+	if i < 0 {
+		t.Fatalf("index does not load a versioned script:\n%s", body)
+	}
+	script := body[i+5 : i+5+strings.Index(body[i+5:], `"`)]
+	got := do(h, "GET", script, "")
+	if got.Code != 200 || !strings.Contains(got.Header().Get("Cache-Control"), "immutable") {
+		t.Errorf("%s answered %d, cache %q", script, got.Code, got.Header().Get("Cache-Control"))
+	}
+	if !strings.Contains(got.Body.String(), "TorreApp") {
+		t.Errorf("%s is not main.js", script)
+	}
+	if rec := do(h, "GET", "/static/000000000000/js/main.js", ""); rec.Code != 404 {
+		t.Errorf("another version's URL answered %d", rec.Code)
+	}
+}

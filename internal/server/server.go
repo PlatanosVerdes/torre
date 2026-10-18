@@ -2,9 +2,12 @@
 package server
 
 import (
+	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/sha256"
 	"embed"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -60,8 +63,27 @@ func (s *Server) Handler() http.Handler {
 
 	static, _ := fs.Sub(web, "web")
 	files := http.FileServerFS(static)
+	version, index := page(static)
 	mux := http.NewServeMux()
 	mux.Handle("GET /", s.cacheStatic(files))
+	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
+		// Never cached, so it always names the current /static/<version>/ below.
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write(index)
+	})
+	mux.HandleFunc("GET /static/{version}/{path...}", func(w http.ResponseWriter, r *http.Request) {
+		// Another version's URL gets a 404 rather than this version's file, which a cache would
+		// then keep under the wrong name for a year.
+		if r.PathValue("version") != version {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		r2 := r.Clone(r.Context())
+		r2.URL.Path = "/" + r.PathValue("path")
+		files.ServeHTTP(w, r2)
+	})
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, "ok "+s.Version+"\n")
 	})
@@ -98,6 +120,31 @@ func secure(next http.Handler) http.Handler {
 		h.Set("Cross-Origin-Resource-Policy", "same-origin")
 		next.ServeHTTP(w, r)
 	})
+}
+
+// page returns the assets' version, a hash of every embedded file, and index.html pointing at
+// /static/<version>/. Telegram's in-app browser keeps scripts it has seen even when told to
+// revalidate, and an ES module's imports are cached by URL, so a release that kept the URLs could
+// run a new page on old components. A URL per version cannot be stale.
+func page(static fs.FS) (string, []byte) {
+	h := sha256.New()
+	_ = fs.WalkDir(static, ".", func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		raw, err := fs.ReadFile(static, path)
+		if err != nil {
+			return err
+		}
+		h.Write([]byte(path))
+		h.Write(raw)
+		return nil
+	})
+	version := hex.EncodeToString(h.Sum(nil))[:12]
+	index, _ := fs.ReadFile(static, "index.html")
+	index = bytes.ReplaceAll(index, []byte(`href="app.css"`), []byte(`href="/static/`+version+`/app.css"`))
+	index = bytes.ReplaceAll(index, []byte(`src="js/main.js"`), []byte(`src="/static/`+version+`/js/main.js"`))
+	return version, index
 }
 
 func (s *Server) cacheStatic(next http.Handler) http.Handler {

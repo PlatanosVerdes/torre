@@ -207,6 +207,9 @@ and MAD at once peaked at 107 MiB.
 - Boarding passes are read on the phone; the server receives route, flight number and date.
 - The server keeps the followed flights and the Telegram id of whoever follows each one, in
   `tracked.json` (mode 600), and deletes both when the flight is done.
+- Each status a followed flight reaches is appended to `history.jsonl` (mode 600): flight, route,
+  scheduled and expected time, and when torre saw it. No chat id; it is there to learn how long
+  routes really take, since AENA drops a flight soon after it is done.
 - The page loads no third-party script, font or analytics, and stores the last route in the
   phone's `localStorage`.
 - There is no default airport. On a first visit with no route the page asks for the phone's
@@ -220,7 +223,7 @@ and MAD at once peaked at 107 MiB.
 | Variable | Default | |
 | :--- | :--- | :--- |
 | `TORRE_PORT` | `8000` | |
-| `TORRE_DATA_DIR` | `./data` (`/data` in the image) | Holds `tracked.json` |
+| `TORRE_DATA_DIR` | `./data` (`/data` in the image) | Holds `tracked.json` and `history.jsonl` |
 | `TORRE_CACHE` | `30s` | How long a board is reused. 10s minimum |
 | `TORRE_CHECK_EVERY` | `2m` | How often followed flights are compared. 30s minimum |
 | `TORRE_TELEGRAM_TOKEN` | | The bot that sends messages and signs Mini App launches |

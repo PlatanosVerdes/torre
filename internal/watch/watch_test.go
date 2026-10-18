@@ -62,6 +62,12 @@ func newWatcher(t *testing.T, b *fakeBoards, n *inbox, now time.Time) *Watcher {
 	return w
 }
 
+// later moves the watcher's clock forward by d.
+func later(w *Watcher, d time.Duration) {
+	at := w.now().Add(d)
+	w.now = func() time.Time { return at }
+}
+
 func TestFollowNotifiesEachChangeOnce(t *testing.T) {
 	b := &fakeBoards{flights: []aena.Flight{flight()}}
 	n := &inbox{}
@@ -89,6 +95,11 @@ func TestFollowNotifiesEachChangeOnce(t *testing.T) {
 	f := flight()
 	f.Status, f.StatusLabel, f.Estimated, f.DelayMin, f.Gate = "RET", "Delayed", "12:55", 35, "R12"
 	b.flights = []aena.Flight{f}
+	w.Check(context.Background())
+	if len(n.msgs) != 1 {
+		t.Fatalf("a change sent before it stood for %s", settle)
+	}
+	later(w, settle)
 	w.Check(context.Background())
 	if len(n.msgs) != 2 {
 		t.Fatalf("got %d messages, want one for the change", len(n.msgs))
@@ -125,6 +136,8 @@ func TestEachChatSeesOnlyItsFlights(t *testing.T) {
 	f.Gate = "R12"
 	b.flights = []aena.Flight{f}
 	n.msgs = nil
+	w.Check(context.Background())
+	later(w, settle)
 	w.Check(context.Background())
 	if len(n.msgs) != 2 || n.msgs[0].chat == n.msgs[1].chat {
 		t.Errorf("a change should reach both chats once: %+v", n.msgs)
@@ -270,22 +283,26 @@ func TestOneMinuteWobbleIsNotNews(t *testing.T) {
 	for _, est := range []struct {
 		time  string
 		delay int
-	}{{"12:21", 1}, {"12:20", 0}, {"12:22", 2}, {"12:24", 4}} {
+	}{{"12:21", 1}, {"12:20", 0}, {"12:26", 6}, {"12:29", 9}} {
 		f := flight()
 		f.Estimated, f.DelayMin = est.time, est.delay
 		b.flights = []aena.Flight{f}
 		w.Check(context.Background())
+		later(w, settle)
+		w.Check(context.Background())
 	}
 	if len(n.msgs) != 1 {
-		t.Fatalf("a time within four minutes of the last message sent %d messages", len(n.msgs)-1)
+		t.Fatalf("a time within nine minutes of the last message sent %d messages", len(n.msgs)-1)
 	}
 
 	f := flight()
-	f.Estimated, f.DelayMin = "12:26", 6
+	f.Estimated, f.DelayMin = "12:32", 12
 	b.flights = []aena.Flight{f}
 	w.Check(context.Background())
-	if len(n.msgs) != 2 || !strings.Contains(n.msgs[1].text, "12:20 → <b>12:26</b>") {
-		t.Fatalf("minutes that added up to six were not sent from the last told time: %+v", n.msgs)
+	later(w, settle)
+	w.Check(context.Background())
+	if len(n.msgs) != 2 || !strings.Contains(n.msgs[1].text, "12:20 → <b>12:32</b>") {
+		t.Fatalf("minutes that added up to twelve were not sent from the last told time: %+v", n.msgs)
 	}
 }
 
@@ -365,5 +382,97 @@ func TestNoArrivalWatchOutsideSpain(t *testing.T) {
 	w.Check(context.Background())
 	if w.List("1")[0].Direction != aena.Departures || !strings.Contains(n.msgs[1].text, "Departed") {
 		t.Errorf("a flight to a non-AENA airport changed boards: %+v", n.msgs)
+	}
+}
+
+// VY3919, 18/10: AENA gave gate D84, took it away two minutes later and gave it back at 22:10.
+func TestAGateThatComesBackIsNotNews(t *testing.T) {
+	b := &fakeBoards{flights: []aena.Flight{flight()}}
+	n := &inbox{}
+	w := newWatcher(t, b, n, morning)
+	if _, err := w.Add(context.Background(), "1", "BCN", aena.Departures, "18/10/2026", "FR2495"); err != nil {
+		t.Fatal(err)
+	}
+	for _, gate := range []string{"D84", "", "D84"} {
+		f := flight()
+		f.Gate = gate
+		b.flights = []aena.Flight{f}
+		w.Check(context.Background())
+		later(w, 3*time.Minute)
+	}
+	later(w, settle)
+	w.Check(context.Background())
+	if len(n.msgs) != 2 || !strings.Contains(n.msgs[1].text, "Gate: — → <b>D84</b>") {
+		t.Fatalf("want one message for D84 once it held: %+v", n.msgs)
+	}
+	f := flight()
+	f.Gate = ""
+	b.flights = []aena.Flight{f}
+	later(w, settle)
+	w.Check(context.Background())
+	later(w, settle)
+	w.Check(context.Background())
+	if len(n.msgs) != 2 {
+		t.Errorf("a gate taken away was sent on its own: %+v", n.msgs[2:])
+	}
+}
+
+func TestWhatCannotWaitGoesAtOnce(t *testing.T) {
+	b := &fakeBoards{flights: []aena.Flight{flight()}}
+	n := &inbox{}
+	w := newWatcher(t, b, n, morning) // 10:00, departure 12:20
+	if _, err := w.Add(context.Background(), "1", "BCN", aena.Departures, "18/10/2026", "FR2495"); err != nil {
+		t.Fatal(err)
+	}
+
+	f := flight()
+	f.Gate = "R12"
+	b.flights = []aena.Flight{f}
+	w.Check(context.Background())
+	if len(n.msgs) != 1 {
+		t.Fatal("a gate two hours before departure went out without waiting")
+	}
+
+	later(w, 90*time.Minute) // 11:30, 50 minutes to go
+	f.Gate = "R20"
+	b.flights = []aena.Flight{f}
+	w.Check(context.Background())
+	if len(n.msgs) != 2 || !strings.Contains(n.msgs[1].text, "<b>R20</b>") {
+		t.Fatalf("a gate change within the hour waited: %+v", n.msgs)
+	}
+
+	f.Status, f.StatusLabel = "EMB", "Boarding"
+	b.flights = []aena.Flight{f}
+	w.Check(context.Background())
+	if len(n.msgs) != 3 || !strings.Contains(n.msgs[2].text, "Boarding") {
+		t.Fatalf("boarding waited: %+v", n.msgs)
+	}
+}
+
+func TestAChangeThatMovesAgainWaitsAgain(t *testing.T) {
+	b := &fakeBoards{flights: []aena.Flight{flight()}}
+	n := &inbox{}
+	w := newWatcher(t, b, n, morning)
+	if _, err := w.Add(context.Background(), "1", "BCN", aena.Departures, "18/10/2026", "FR2495"); err != nil {
+		t.Fatal(err)
+	}
+	for _, est := range []struct {
+		time  string
+		delay int
+	}{{"12:40", 20}, {"13:05", 45}} {
+		f := flight()
+		f.Status, f.StatusLabel, f.Estimated, f.DelayMin = "RET", "Delayed", est.time, est.delay
+		b.flights = []aena.Flight{f}
+		w.Check(context.Background())
+		later(w, 6*time.Minute)
+	}
+	w.Check(context.Background())
+	if len(n.msgs) != 1 {
+		t.Fatal("a delay that moved again went out before the new one stood")
+	}
+	later(w, settle)
+	w.Check(context.Background())
+	if len(n.msgs) != 2 || !strings.Contains(n.msgs[1].text, "<b>13:05</b>") {
+		t.Fatalf("want the delay that held, 13:05: %+v", n.msgs)
 	}
 }

@@ -145,7 +145,6 @@ func (m Message) OpenURL() string {
 	return ""
 }
 
-// Chat is where a message came from. In a private chat it is the person, with their name.
 type Chat struct {
 	ID        int64  `json:"id"`
 	Type      string `json:"type"`

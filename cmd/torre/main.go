@@ -45,7 +45,7 @@ func run() error {
 		readBot   = env("TORRE_BOT_UPDATES", "") == "1"
 		aenaURL   = env("TORRE_AENA_URL", aena.DefaultBaseURL)
 		logAsJSON = env("TORRE_LOG_JSON", "") == "1"
-		// Where muninn reads who uses the bot. Names: on a port that is never published.
+		// Lists names: never publish this address.
 		statsAddr = env("TORRE_STATS_ADDR", "")
 	)
 	// Under ten seconds the cache stops protecting AENA from a page left open on several phones.
@@ -153,7 +153,6 @@ func duration(key string, def time.Duration) time.Duration {
 	return d
 }
 
-// serveStats answers muninn with the bot's /bot-stats, and torre's own figures: what is followed.
 func serveStats(addr string, rec *botstats.Recorder, name string, w *watch.Watcher, log *slog.Logger) {
 	about := func() botstats.About {
 		flights := w.List("")

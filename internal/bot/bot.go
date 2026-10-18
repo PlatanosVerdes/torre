@@ -31,7 +31,6 @@ type Bot struct {
 	Watch   *watch.Watcher
 	BaseURL string
 	Log     *slog.Logger
-	// Stats, when set, counts who writes and what the rate limit turns away, for muninn.
 	Stats *botstats.Recorder
 
 	perChat *limit.Limiter
@@ -157,8 +156,7 @@ func (b *Bot) Tap(ctx context.Context, c *telegram.Callback) {
 	}
 }
 
-// allow counts the update and applies the per-chat limit. Every update counts, the ones turned
-// away too: a flood shows up as traffic and as rejections, not as silence.
+// Turned-away updates count too, so a flood shows in the stats.
 func (b *Bot) allow(chat string, c telegram.Chat) bool {
 	if b.Stats != nil {
 		b.Stats.Message(chat, c.FirstName, c.Username)

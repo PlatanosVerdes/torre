@@ -16,3 +16,10 @@ func TestLookup(t *testing.T) {
 		t.Errorf("only %d places; the generator lost most of them", n)
 	}
 }
+
+func TestCoordinates(t *testing.T) {
+	p, _ := Lookup("PMI")
+	if p.Lat < 39 || p.Lat > 40 || p.Lon < 2 || p.Lon > 3 {
+		t.Errorf("PMI at %v,%v", p.Lat, p.Lon)
+	}
+}

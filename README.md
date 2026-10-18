@@ -179,7 +179,7 @@ The page is meant to be public. What keeps it standing:
 | 10 followed flights per chat, 5,000 in total | `watch.Watcher` |
 | Request bodies capped at 8 KB, headers at 16 KB, read and write timeouts on the server | `main.go` |
 | AENA's error text goes to the log, never to the visitor | `server.upstream` |
-| Strict Content-Security-Policy (`default-src 'self'`, no inline script or style), `nosniff`, no referrer, no camera or location | `server.secure` |
+| Strict Content-Security-Policy (`default-src 'self'`, no inline script or style), `nosniff`, no referrer, no camera; location for the page itself only | `server.secure` |
 | Non-root user, read-only filesystem, no capabilities, `no-new-privileges`, a process limit and a memory limit | `Dockerfile`, compose |
 
 Memory: the usual two-day board keeps the process around 16 MiB; holding the two-week boards of BCN
@@ -191,8 +191,12 @@ and MAD at once peaked at 107 MiB.
 - Boarding passes are read on the phone; the server receives route, flight number and date.
 - The server keeps the followed flights and the Telegram id of whoever follows each one, in
   `tracked.json` (mode 600), and deletes both when the flight is done.
-- The page loads no third-party script, font or analytics, and stores the last airport in the
+- The page loads no third-party script, font or analytics, and stores the last route in the
   phone's `localStorage`.
+- There is no default airport. On a first visit with no route the page asks for the phone's
+  location once, finds the nearest Spanish airport within 200 km **on the phone**, and starts there.
+  The position is never sent anywhere; refusing, an error or being abroad leaves the route empty.
+  Airport coordinates come with the OurAirports list.
 
 ## Configuration
 
@@ -220,7 +224,7 @@ carry `X-Telegram-Init-Data`.
 | :--- | :--- |
 | `GET /api/board?airport=BCN&dir=S` | The board. `dir=L` for arrivals, `range=full` for two weeks |
 | `GET /api/airports` | AENA's airports |
-| `GET /api/places` | Every airport with scheduled flights (OurAirports) |
+| `GET /api/places` | Every airport with scheduled flights, with coordinates (OurAirports) |
 | `GET /api/tracked` | Your followed flights, and whether you can follow from here |
 | `POST /api/tracked` | Follow `{"airport":"BCN","direction":"S","date":"18/10/2026","number":"FR2495"}` |
 | `DELETE /api/tracked/{id}` | Stop following |

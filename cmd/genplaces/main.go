@@ -9,9 +9,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -43,14 +45,14 @@ func run() error {
 	for i, h := range header {
 		col[h] = i
 	}
-	for _, need := range []string{"type", "name", "iso_country", "municipality", "scheduled_service", "iata_code"} {
+	for _, need := range []string{"type", "name", "iso_country", "municipality", "scheduled_service", "iata_code", "latitude_deg", "longitude_deg"} {
 		if _, ok := col[need]; !ok {
 			return fmt.Errorf("column %q is missing; the CSV changed", need)
 		}
 	}
 
-	// [iata, name, city, country]: positional to keep the embedded file small.
-	var out [][4]string
+	// [iata, name, city, country, lat, lon]: positional to keep the embedded file small.
+	var out [][]any
 	seen := map[string]bool{}
 	for {
 		rec, err := r.Read()
@@ -71,9 +73,13 @@ func run() error {
 		}
 		seen[code] = true
 		// The municipality is kept whole ("Ingliston, Edinburgh"): it is only searched, never shown.
-		out = append(out, [4]string{code, shorten(rec[col["name"]]), rec[col["municipality"]], rec[col["iso_country"]]})
+		lat, _ := strconv.ParseFloat(rec[col["latitude_deg"]], 64)
+		lon, _ := strconv.ParseFloat(rec[col["longitude_deg"]], 64)
+		// Two decimals is about a kilometre: enough to find the nearest airport, half the bytes.
+		out = append(out, []any{code, shorten(rec[col["name"]]), rec[col["municipality"]], rec[col["iso_country"]],
+			math.Round(lat*100) / 100, math.Round(lon*100) / 100})
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i][0] < out[j][0] })
+	sort.Slice(out, func(i, j int) bool { return out[i][0].(string) < out[j][0].(string) })
 
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetEscapeHTML(false)

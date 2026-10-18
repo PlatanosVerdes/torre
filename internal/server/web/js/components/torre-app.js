@@ -15,6 +15,13 @@ const store = {
 };
 const iata = (s) => /^[A-Z]{3}$/.test((s || '').toUpperCase()) ? s.toUpperCase() : '';
 
+function distanceKm(lat1, lon1, lat2, lon2) {
+  const rad = Math.PI / 180;
+  const a = Math.sin((lat2 - lat1) * rad / 2) ** 2 +
+    Math.cos(lat1 * rad) * Math.cos(lat2 * rad) * Math.sin((lon2 - lon1) * rad / 2) ** 2;
+  return 12742 * Math.asin(Math.sqrt(a));
+}
+
 // A long board renders this many rows; the search narrows it far below that.
 const MAX_ROWS = 400;
 
@@ -115,8 +122,10 @@ export class TorreApp extends LitElement {
       this.from = iata(params.get('from'));
       this.to = iata(params.get('to'));
     } else {
-      this.from = iata(store.get('from', 'BCN'));
+      this.from = iata(store.get('from', ''));
       this.to = iata(store.get('to', ''));
+      // No default airport: on a first visit the nearest one is found from the phone's location.
+      this.locating = !this.from && !this.to && store.get('located', '') !== '1';
     }
     this.query = params.get('q') || '';
     this.pendingOpen = target?.flight || params.get('f') || '';
@@ -138,7 +147,7 @@ export class TorreApp extends LitElement {
   connectedCallback() {
     super.connectedCallback();
     this.#saveUrl();
-    this.#loadAirports().then(() => this.#loadBoard()).then(() => this.#loadWorld());
+    this.#loadAirports().then(() => this.#loadBoard()).then(() => this.#loadWorld()).then(() => this.#locate());
     this.#loadTracked();
     this.onVisible = () => document.visibilityState === 'visible' && this.#refresh();
     document.addEventListener('visibilitychange', this.onVisible);
@@ -194,6 +203,31 @@ export class TorreApp extends LitElement {
 
   async #loadAirports() {
     try { this.airports = await this.api.airports(); } catch {}
+  }
+
+  // locate asks for the phone's position once, on a first visit, and starts the route at the nearest
+  // Spanish airport within 200 km. The position stays on the phone; only the airport is used. A
+  // refusal, an error or being far from Spain leaves the route empty, and it is never asked again.
+  #locate() {
+    if (!this.locating) return;
+    const done = () => { this.locating = false; store.set('located', '1'); this.requestUpdate(); };
+    if (!navigator.geolocation) { done(); return; }
+    navigator.geolocation.getCurrentPosition(pos => {
+      const near = this.#nearest(pos.coords.latitude, pos.coords.longitude);
+      done();
+      if (near && !this.from && !this.to) this.#setRoute(near, '');
+    }, done, { enableHighAccuracy: false, timeout: 10_000, maximumAge: 600_000 });
+  }
+
+  #nearest(lat, lon) {
+    const aena = new Set(this.airports.map(a => a.iata));
+    let best = '', bestKm = 200;
+    for (const p of this.world) {
+      if (!aena.has(p.iata)) continue;
+      const km = distanceKm(lat, lon, p.lat, p.lon);
+      if (km < bestKm) { best = p.iata; bestKm = km; }
+    }
+    return best;
   }
 
   // The world's airports only feed the pickers, so they load after the board, not before it.
@@ -415,7 +449,7 @@ export class TorreApp extends LitElement {
       if (!this.airports.length && (this.from || this.to)) return html`<div class="empty">Loading…</div>`;
       return html`<div class="empty">${this.from || this.to
         ? 'Torre has flights from or to Spanish airports only (AENA). Make one end of the route a Spanish airport.'
-        : 'Choose where you fly from, where you fly to, or both.'}</div>`;
+        : this.locating ? 'Finding the nearest airport…' : 'Choose where you fly from, where you fly to, or both.'}</div>`;
     }
     if (this.error) return html`<div class="error">${this.error}</div>`;
     if (!this.flights.length) return html`<div class="empty">Loading…</div>`;

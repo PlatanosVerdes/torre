@@ -30,6 +30,7 @@ type Bot struct {
 	TG      Telegram
 	Watch   *watch.Watcher
 	BaseURL string
+	Version string
 	Log     *slog.Logger
 	Stats   *botstats.Recorder
 
@@ -45,13 +46,16 @@ var commands = map[string]string{
 // The start parameter a "Follow in Telegram" link carries: BCN_S_18102026_FR2495.
 var startParam = regexp.MustCompile(`^([A-Z]{3})_([SL])_(\d{2})(\d{2})(\d{4})_([A-Z0-9]{3,8})$`)
 
-const help = `Torre shows departures and arrivals for every AENA airport in Spain and tells you when a flight you follow changes time, gate or status.
+const helpText = `Torre shows departures and arrivals for every AENA airport in Spain and tells you when a flight you follow changes time, gate or status.
 
 Tap <b>Open</b> to see a board, follow a flight, or add your boarding pass. The pass is read on your phone: your name and booking reference never leave it.
 
-/flights lists what you follow.
+/flights lists what you follow.`
 
-Torre is open source: https://github.com/PlatanosVerdes/torre`
+func (b *Bot) help() string {
+	return helpText + "\n\n" + `<a href="https://t.me/TorreFlightsBot">Torre</a> <a href="https://github.com/PlatanosVerdes/torre">` + b.Version +
+		`</a> · <a href="https://torre.platanosverdes.com">torre.platanosverdes.com</a> · made by <a href="https://github.com/PlatanosVerdes">@PlatanosVerdes</a>`
+}
 
 func (b *Bot) Run(ctx context.Context) {
 	b.perChat = limit.New(20, 10)
@@ -106,11 +110,11 @@ func (b *Bot) Handle(ctx context.Context, m *telegram.Message) {
 	case command == "/start" && arg != "":
 		text, open = b.startFlight(arg)
 	case command == "/start":
-		text, open = "Welcome to <b>Torre</b>.\n\n"+help, b.BaseURL
+		text, open = "Welcome to <b>Torre</b>.\n\n"+b.help(), b.BaseURL
 	case command == "/flights":
 		text, open = b.flights(chat), b.BaseURL
 	case command == "/help":
-		text, open = help, b.BaseURL
+		text, open = b.help(), b.BaseURL
 	case len(m.Photo) > 0 || m.Document != nil:
 		text, open = "Add boarding passes inside the app, with <b>Add boarding pass</b>. It is read on your phone, so your name and booking reference never reach the server.", b.BaseURL
 	default:
@@ -173,7 +177,7 @@ func (b *Bot) allow(chat string, c telegram.Chat) bool {
 func (b *Bot) startFlight(arg string) (string, string) {
 	m := startParam.FindStringSubmatch(arg)
 	if m == nil {
-		return "Welcome to <b>Torre</b>.\n\n" + help, b.BaseURL
+		return "Welcome to <b>Torre</b>.\n\n" + b.help(), b.BaseURL
 	}
 	date := m[3] + "/" + m[4] + "/" + m[5]
 	q := url.Values{"a": {m[1]}, "d": {m[2]}, "f": {date + "-" + m[6]}}

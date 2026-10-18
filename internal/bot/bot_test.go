@@ -71,6 +71,19 @@ func TestStartOpensTheApp(t *testing.T) {
 	}
 }
 
+func TestHelpEndsWithTheCredits(t *testing.T) {
+	b, tg := newBot(t)
+	b.Version = "v2026.10.18.1"
+	b.Handle(context.Background(), msg("/help"))
+	want := `<a href="https://t.me/TorreFlightsBot">Torre</a> <a href="https://github.com/PlatanosVerdes/torre">v2026.10.18.1</a> · <a href="https://torre.platanosverdes.com">torre.platanosverdes.com</a> · made by <a href="https://github.com/PlatanosVerdes">@PlatanosVerdes</a>`
+	if len(tg.sent) != 1 || !strings.HasSuffix(tg.sent[0].text, "\n\n"+want) {
+		t.Fatalf("got %+v", tg.sent)
+	}
+	if strings.Count(tg.sent[0].text, "github.com/PlatanosVerdes/torre") != 1 {
+		t.Errorf("repo linked more than once: %q", tg.sent[0].text)
+	}
+}
+
 func TestStartWithAFlightOpensIt(t *testing.T) {
 	b, tg := newBot(t)
 	b.Handle(context.Background(), msg("/start BCN_S_18102026_FR2495"))

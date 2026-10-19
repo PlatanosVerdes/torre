@@ -51,6 +51,7 @@ func run() error {
 		// Lists names: never publish this address.
 		statsAddr = env("TORRE_STATS_ADDR", "")
 		collect   = strings.Fields(strings.ToUpper(strings.ReplaceAll(env("TORRE_COLLECT", ""), ",", " ")))
+		sample    = number("TORRE_SAMPLE", 0)
 	)
 	// Under ten seconds the cache stops protecting AENA from a page left open on several phones.
 	if ttl < 10*time.Second {
@@ -69,7 +70,11 @@ func run() error {
 	}
 
 	client := aena.New(aenaURL, ttl)
-	watcher, err := watch.New(dataDir, client, tg, client.Zone, log)
+	var notifier watch.Notifier = tg
+	if sample > 0 {
+		notifier = &watch.SampleNotifier{Next: tg, Path: filepath.Join(dataDir, "sample.jsonl"), Now: time.Now}
+	}
+	watcher, err := watch.New(dataDir, client, notifier, client.Zone, log)
 	if err != nil {
 		return err
 	}
@@ -95,6 +100,9 @@ func run() error {
 	if len(collect) > 0 {
 		h := watch.NewHistory(filepath.Join(dataDir, "collect.jsonl"))
 		go watch.Collect(ctx, client, collect, h, client.Zone, every, log)
+		if sample > 0 {
+			go watcher.Sample(ctx, collect, sample, every)
+		}
 	}
 	if ownBot {
 		b := &bot.Bot{TG: tg, Watch: watcher, BaseURL: publicURL, Version: buildVersion, Log: log,
@@ -132,7 +140,7 @@ func run() error {
 	}()
 
 	log.Info("torre listening", "version", buildVersion, "port", port,
-		"telegram", tg.Enabled(), "bot_updates", readBot, "owner", owner != "", "public_url", publicURL, "collect", collect)
+		"telegram", tg.Enabled(), "bot_updates", readBot, "owner", owner != "", "public_url", publicURL, "collect", collect, "sample", sample)
 	if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}
@@ -164,10 +172,13 @@ func duration(key string, def time.Duration) time.Duration {
 
 func serveStats(addr string, rec *botstats.Recorder, name string, w *watch.Watcher, log *slog.Logger) {
 	about := func() botstats.About {
-		flights := w.List("")
+		var flights []watch.Tracked
 		chats := map[string]bool{}
-		for _, t := range flights {
-			chats[t.Chat] = true
+		for _, t := range w.List("") {
+			if !watch.Sampled(t) {
+				flights = append(flights, t)
+				chats[t.Chat] = true
+			}
 		}
 		return botstats.About{Platform: "telegram", Bot: name, Name: "Torre", Extra: []botstats.Extra{
 			{Label: "Flights followed", Value: strconv.Itoa(len(flights))},

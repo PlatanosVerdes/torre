@@ -187,7 +187,7 @@ func (w *Watcher) Add(ctx context.Context, chat, airport string, dir aena.Direct
 			mine++
 		}
 	}
-	if mine >= w.MaxChat || len(w.tracked) >= w.MaxTotal {
+	if (w.capped(chat) && mine >= w.MaxChat) || len(w.tracked) >= w.MaxTotal {
 		w.mu.Unlock()
 		return Tracked{}, fmt.Errorf("%w: up to %d at a time", ErrTooMany, w.MaxChat)
 	}

@@ -666,3 +666,40 @@ func TestHistoryDoesNotRepeatAfterARestart(t *testing.T) {
 		t.Errorf("want one line across the restart, got %d:\n%s", n, raw)
 	}
 }
+
+func TestSampleFollowsFlightsDueSoonAndKeepsThemOffTelegram(t *testing.T) {
+	due := func(number, at string) aena.Flight {
+		f := flight()
+		f.Number, f.Scheduled, f.ID, f.Codeshare = number, at, "18/10/2026-"+number+"-"+strings.ReplaceAll(at, ":", ""), nil
+		return f
+	}
+	gone := due("FR0003", "11:00")
+	gone.Final = true
+	b := &fakeBoards{flights: []aena.Flight{due("FR0001", "10:10"), due("FR0002", "11:00"), gone, due("FR0004", "12:00"), due("FR0005", "17:00")}}
+	real := &inbox{}
+	path := t.TempDir() + "/sample.jsonl"
+	w := newWatcher(t, b, real, morning)
+	w.notify = &SampleNotifier{Next: real, Path: path, Now: func() time.Time { return morning }}
+	w.MaxChat = 1
+
+	w.sample(context.Background(), []string{"BCN"}, 5)
+	var got []string
+	for _, tr := range w.List(SampleChat) {
+		got = append(got, tr.Number)
+	}
+	if strings.Join(got, ",") != "FR0002,FR0004" {
+		t.Errorf("sampled %v, want only the flights due in 30 min to 6 h that are not done", got)
+	}
+	if len(real.msgs) != 0 {
+		t.Errorf("a sample message reached Telegram: %+v", real.msgs)
+	}
+	raw, _ := os.ReadFile(path)
+	if strings.Count(string(raw), "Following") != 2 {
+		t.Errorf("sample messages not written:\n%s", raw)
+	}
+
+	w.sample(context.Background(), []string{"BCN"}, 5)
+	if n := len(w.List(SampleChat)); n != 2 {
+		t.Errorf("topping up followed a flight twice: %d", n)
+	}
+}

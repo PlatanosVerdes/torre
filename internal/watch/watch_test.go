@@ -557,3 +557,27 @@ func TestHistoryKeepsEachStatusOnce(t *testing.T) {
 		t.Error("a chat id reached the history")
 	}
 }
+
+func TestCollectWritesEachChangeOnce(t *testing.T) {
+	other := flight()
+	other.ID, other.Number = "18/10/2026-VY3919", "VY3919"
+	b := &fakeBoards{flights: []aena.Flight{flight(), other}}
+	h := NewHistory(t.TempDir() + "/collect.jsonl")
+	for range 2 {
+		if err := collect(context.Background(), b, "BCN", aena.Departures, h, madrid); err != nil {
+			t.Fatal(err)
+		}
+	}
+	b.flights[1].Gate = "D84"
+	if err := collect(context.Background(), b, "BCN", aena.Departures, h, madrid); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(h.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
+	if len(lines) != 3 || !strings.Contains(lines[2], `"gate":"D84"`) {
+		t.Errorf("want two flights and one gate change:\n%s", raw)
+	}
+}

@@ -207,8 +207,8 @@ and MAD at once peaked at 107 MiB.
 - Boarding passes are read on the phone; the server receives route, flight number and date.
 - The server keeps the followed flights and the Telegram id of whoever follows each one, in
   `tracked.json` (mode 600), and deletes both when the flight is done.
-- Each status a followed flight reaches is appended to `history.jsonl` (mode 600): flight, route,
-  scheduled and expected time, and when torre saw it. No chat id; it is there to learn how long
+- Each change of a followed flight's status, expected time, gate or belt is appended to
+  `history.jsonl` (mode 600): flight, route, those values, and when torre saw it. No chat id; it is there to learn how long
   routes really take, since AENA drops a flight soon after it is done.
 - The page loads no third-party script, font or analytics, and stores the last route in the
   phone's `localStorage`.
@@ -231,6 +231,7 @@ and MAD at once peaked at 107 MiB.
 | `TORRE_PUBLIC_URL` | | The page's address, for the "Open in Torre" button. No button when empty |
 | `TORRE_BOT_NAME` | | The bot's username, for "Follow in Telegram" links from a browser |
 | `TORRE_BOT_UPDATES` | | `1` makes torre answer its bot's messages. Only for a bot it has to itself: Telegram allows one reader per token |
+| `TORRE_COLLECT` | | Temporary, to tune the watch: airports (`PMI,BCN`) whose every flight change goes to `collect.jsonl` |
 | `TORRE_STATS_ADDR` | | With the bot on, an address such as `:9180` that exposes its stats at `/bot-stats`: who uses it, its traffic and the updates the rate limit turned away (`gonana/botstats`, kept in `bot-stats.json` in the data dir). It lists names: never publish it |
 | `TORRE_CLIENT_IP_HEADER` | | The header the proxy in front writes the visitor's address into |
 | `TORRE_LOG_JSON` | `1` in the image | JSON logs, which Vector collects |

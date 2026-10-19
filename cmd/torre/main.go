@@ -10,6 +10,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -49,6 +50,7 @@ func run() error {
 		logAsJSON = env("TORRE_LOG_JSON", "") == "1"
 		// Lists names: never publish this address.
 		statsAddr = env("TORRE_STATS_ADDR", "")
+		collect   = strings.Fields(strings.ToUpper(strings.ReplaceAll(env("TORRE_COLLECT", ""), ",", " ")))
 	)
 	// Under ten seconds the cache stops protecting AENA from a page left open on several phones.
 	if ttl < 10*time.Second {
@@ -90,6 +92,10 @@ func run() error {
 	ownBot := readBot && tg.Enabled() && publicURL != ""
 	watcher.StopButton = ownBot
 	go watcher.Run(ctx, every)
+	if len(collect) > 0 {
+		h := watch.NewHistory(filepath.Join(dataDir, "collect.jsonl"))
+		go watch.Collect(ctx, client, collect, h, client.Zone, every, log)
+	}
 	if ownBot {
 		b := &bot.Bot{TG: tg, Watch: watcher, BaseURL: publicURL, Version: buildVersion, Log: log,
 			Routes: adsbdb.New(adsbdbURL), Boards: client, Spanish: watcher.Spanish, Zone: client.Zone}
@@ -126,7 +132,7 @@ func run() error {
 	}()
 
 	log.Info("torre listening", "version", buildVersion, "port", port,
-		"telegram", tg.Enabled(), "bot_updates", readBot, "owner", owner != "", "public_url", publicURL)
+		"telegram", tg.Enabled(), "bot_updates", readBot, "owner", owner != "", "public_url", publicURL, "collect", collect)
 	if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}

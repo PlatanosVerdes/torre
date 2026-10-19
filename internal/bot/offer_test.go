@@ -101,7 +101,7 @@ func TestOfferFoundThroughTheRouteAndTheBoard(t *testing.T) {
 	if len(c) != 2 || c[0].Text != "Follow this flight" || c[1].Text != "No" || c[1].Data != "n" {
 		t.Fatalf("buttons %+v", c)
 	}
-	if c[0].Data != "f:PMI:S:"+strings.ReplaceAll(day(0), "/", "")+":VY3919" || len(c[0].Data) > 64 {
+	if c[0].Data != "f:PMI:S:"+strings.ReplaceAll(day(0), "/", "")+":VY3919:2318" || len(c[0].Data) > 64 {
 		t.Errorf("follow data %q", c[0].Data)
 	}
 	if strings.Join(bs.asked, ",") != "PMI/S" {
@@ -184,5 +184,27 @@ func TestNoRemovesTheButtons(t *testing.T) {
 	b.Tap(context.Background(), offerTap("n"))
 	if len(b.Watch.List("42")) != 0 || len(tg.answers) != 1 || len(tg.keysLeft) != 1 || len(tg.keysLeft[0].Choices) != 0 {
 		t.Errorf("answers %v, buttons left %+v", tg.answers, tg.keysLeft)
+	}
+}
+
+func TestOfferTellsApartTwoRowsOnOneDay(t *testing.T) {
+	night, evening := vueling(day(0)), vueling(day(0))
+	night.Scheduled, night.Other = "00:05", "NAP"
+	evening.Scheduled, evening.Other = "16:40", "BIO"
+	b, tg, _ := offerBot(t, map[string][]aena.Flight{"PMI/S": {night, evening}}, 0)
+	b.Handle(context.Background(), msg("VY3919"))
+	got := tg.sent[0]
+	c := got.keys.Choices
+	if len(c) != 3 || c[0].Text != "Follow today "+day(0)[:5]+" 00:05" || c[1].Text != "Follow today "+day(0)[:5]+" 16:40" {
+		t.Fatalf("buttons %+v", c)
+	}
+	if !strings.Contains(got.text, "→ Napoli (NAP)") || !strings.Contains(got.text, "→ Bilbao (BIO)") {
+		t.Errorf("routes not told apart: %s", got.text)
+	}
+
+	b.Tap(context.Background(), offerTap(c[1].Data))
+	list := b.Watch.List("42")
+	if len(list) != 1 || list[0].Scheduled != "16:40" {
+		t.Fatalf("followed %+v", list)
 	}
 }

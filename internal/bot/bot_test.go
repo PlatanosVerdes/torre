@@ -144,7 +144,7 @@ func tap(chat int64, data string) *telegram.Callback {
 
 func TestStopFollowingFromTheMessage(t *testing.T) {
 	b, tg := newBot(t)
-	tr, err := b.Watch.Add(context.Background(), "42", "BCN", aena.Departures, "18/10/2026", "FR2495")
+	tr, err := b.Watch.Add(context.Background(), "42", "BCN", aena.Departures, "18/10/2026", "FR2495", "")
 	if err != nil {
 		t.Fatal(err)
 	}

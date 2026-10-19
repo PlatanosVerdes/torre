@@ -22,8 +22,9 @@ type Routes interface {
 // flightText is a flight number typed on its own, optionally with an airport: "VY3919", "vy 3919", "VY3919 PMI".
 var flightText = regexp.MustCompile(`^([A-Z][A-Z0-9]|[0-9][A-Z]|[A-Z]{3}) ?([0-9]{1,4}[A-Z]?)(?: +([A-Z]{3}))?$`)
 
-// followData is a "Follow" button's callback: f:PMI:S:19102026:VY3919.
-var followData = regexp.MustCompile(`^f:([A-Z]{3}):([SL]):(\d{2})(\d{2})(\d{4}):([A-Z0-9]{3,8})$`)
+// followData is a "Follow" button's callback: f:PMI:S:19102026:VY3919:2225. Buttons sent before
+// the time was added have none.
+var followData = regexp.MustCompile(`^f:([A-Z]{3}):([SL]):(\d{2})(\d{2})(\d{4}):([A-Z0-9]{3,8})(?::(\d{2})(\d{2}))?$`)
 
 const declineData = "n"
 
@@ -77,7 +78,7 @@ func (b *Bot) offer(ctx context.Context, number, airport string) (string, telegr
 			return "AENA is not answering right now, try again in a minute.", telegram.Keys{}
 		}
 		for _, d := range days {
-			if f := watch.Find(flights, d.Format("02/01/2006"), number); f != nil {
+			for _, f := range watch.FindAll(flights, d.Format("02/01/2006"), number) {
 				found = append(found, *f)
 			}
 		}
@@ -106,14 +107,32 @@ func (b *Bot) offer(ctx context.Context, number, airport string) (string, telegr
 	if f.Direction == aena.Arrivals {
 		from, to = to, from
 	}
-	lines := []string{head, place(from) + " → " + place(to)}
+	// A codeshare number can fly another route on another row (QR3652 into BCN from NAP and BIO).
+	sameRoute := true
+	for _, o := range found {
+		sameRoute = sameRoute && o.Other == f.Other
+	}
+	lines := []string{head}
+	if sameRoute {
+		lines = append(lines, place(from)+" → "+place(to))
+	}
+	twice := map[string]bool{}
+	seen := map[string]bool{}
+	for _, o := range found {
+		twice[o.Date] = seen[o.Date]
+		seen[o.Date] = true
+	}
 	var keys telegram.Keys
 	for _, f := range found {
 		day := "today"
 		if f.Date != days[0].Format("02/01/2006") {
 			day = "tomorrow"
 		}
-		lines = append(lines, when(f)+" · "+day+" "+f.Date[:5]+" · "+esc(f.StatusLabel))
+		line := when(f) + " · " + day + " " + f.Date[:5] + " · " + esc(f.StatusLabel)
+		if !sameRoute {
+			line = route(f) + " · " + line
+		}
+		lines = append(lines, line)
 		if len(found) == 1 {
 			if where := gate(f); where != "" {
 				lines = append(lines, where)
@@ -122,8 +141,11 @@ func (b *Bot) offer(ctx context.Context, number, airport string) (string, telegr
 		text := "Follow this flight"
 		if len(found) > 1 {
 			text = "Follow " + day + " " + f.Date[:5]
+			if twice[f.Date] {
+				text += " " + f.Scheduled
+			}
 		}
-		data := strings.Join([]string{"f", f.Airport, string(f.Direction), strings.ReplaceAll(f.Date, "/", ""), aena.Canonical(f.Number)}, ":")
+		data := strings.Join([]string{"f", f.Airport, string(f.Direction), strings.ReplaceAll(f.Date, "/", ""), aena.Canonical(f.Number), strings.ReplaceAll(f.Scheduled, ":", "")}, ":")
 		keys.Choices = append(keys.Choices, telegram.Choice{Text: text, Data: data})
 	}
 	keys.Choices = append(keys.Choices, telegram.Choice{Text: "No", Data: declineData})
@@ -147,7 +169,11 @@ func (b *Bot) follow(ctx context.Context, chat string, c *telegram.Callback) boo
 		_ = b.TG.Answer(ctx, c.ID, "Not an AENA airport")
 		return true
 	}
-	_, err := b.Watch.Add(ctx, chat, m[1], aena.Direction(m[2]), m[3]+"/"+m[4]+"/"+m[5], m[6])
+	scheduled := ""
+	if m[7] != "" {
+		scheduled = m[7] + ":" + m[8]
+	}
+	_, err := b.Watch.Add(ctx, chat, m[1], aena.Direction(m[2]), m[3]+"/"+m[4]+"/"+m[5], m[6], scheduled)
 	notice := "Following " + m[6]
 	switch {
 	case errors.Is(err, watch.ErrNotFound):
@@ -204,6 +230,13 @@ func when(f aena.Flight) string {
 		return fmt.Sprintf("%s %s, now expected <b>%s</b> (%+d min)", verb, f.Scheduled, watch.Time(f), f.DelayMin)
 	}
 	return verb + " " + f.Scheduled
+}
+
+func route(f aena.Flight) string {
+	if f.Direction == aena.Arrivals {
+		return place(f.Other) + " → " + place(f.Airport)
+	}
+	return place(f.Airport) + " → " + place(f.Other)
 }
 
 func gate(f aena.Flight) string {

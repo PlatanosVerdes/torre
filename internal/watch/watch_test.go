@@ -76,7 +76,7 @@ func TestFollowNotifiesEachChangeOnce(t *testing.T) {
 	w := newWatcher(t, b, n, morning)
 	w.BaseURL = "https://torre.example"
 
-	if _, err := w.Add(context.Background(), "42", "bcn", aena.Departures, "18/10/2026", "fr 02495"); err != nil {
+	if _, err := w.Add(context.Background(), "42", "bcn", aena.Departures, "18/10/2026", "fr 02495", ""); err != nil {
 		t.Fatal(err)
 	}
 	if len(n.msgs) != 1 || !strings.HasPrefix(n.msgs[0].text, "Following") || n.msgs[0].chat != "42" {
@@ -122,8 +122,8 @@ func TestEachChatSeesOnlyItsFlights(t *testing.T) {
 	b := &fakeBoards{flights: []aena.Flight{flight()}}
 	n := &inbox{}
 	w := newWatcher(t, b, n, morning)
-	a, _ := w.Add(context.Background(), "1", "BCN", aena.Departures, "18/10/2026", "FR2495")
-	if _, err := w.Add(context.Background(), "2", "BCN", aena.Departures, "18/10/2026", "FR2495"); err != nil {
+	a, _ := w.Add(context.Background(), "1", "BCN", aena.Departures, "18/10/2026", "FR2495", "")
+	if _, err := w.Add(context.Background(), "2", "BCN", aena.Departures, "18/10/2026", "FR2495", ""); err != nil {
 		t.Fatal(err)
 	}
 	if len(w.List("1")) != 1 || len(w.List("2")) != 1 || len(w.List("")) != 2 {
@@ -151,7 +151,7 @@ func TestFollowByCodeshareNumberOnce(t *testing.T) {
 	n := &inbox{}
 	w := newWatcher(t, b, n, morning)
 	for _, number := range []string{"XX1", "FR2495"} {
-		tr, err := w.Add(context.Background(), "1", "BCN", aena.Departures, "18/10/2026", number)
+		tr, err := w.Add(context.Background(), "1", "BCN", aena.Departures, "18/10/2026", number, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -174,7 +174,7 @@ func TestPerChatLimit(t *testing.T) {
 	w := newWatcher(t, &fakeBoards{flights: flights}, &inbox{}, morning)
 	w.MaxChat = 2
 	for i, f := range flights {
-		_, err := w.Add(context.Background(), "1", "BCN", aena.Departures, "18/10/2026", f.Number)
+		_, err := w.Add(context.Background(), "1", "BCN", aena.Departures, "18/10/2026", f.Number, "")
 		if (i < 2) != (err == nil) {
 			t.Errorf("flight %d: %v", i, err)
 		}
@@ -183,7 +183,7 @@ func TestPerChatLimit(t *testing.T) {
 
 func TestUnknownFlightIsRefused(t *testing.T) {
 	w := newWatcher(t, &fakeBoards{}, &inbox{}, morning)
-	if _, err := w.Add(context.Background(), "1", "BCN", aena.Departures, "18/10/2026", "FR1"); err == nil {
+	if _, err := w.Add(context.Background(), "1", "BCN", aena.Departures, "18/10/2026", "FR1", ""); err == nil {
 		t.Error("a flight that is not on the board was accepted")
 	}
 }
@@ -192,7 +192,7 @@ func TestFarFlightWaitsUntilPublished(t *testing.T) {
 	b := &fakeBoards{}
 	n := &inbox{}
 	w := newWatcher(t, b, n, morning)
-	tr, err := w.Add(context.Background(), "1", "BCN", aena.Departures, "20/11/2026", "FR2495")
+	tr, err := w.Add(context.Background(), "1", "BCN", aena.Departures, "20/11/2026", "FR2495", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -219,7 +219,7 @@ func TestFarFlightWaitsUntilPublished(t *testing.T) {
 func TestBlockedBotIsNotFollowed(t *testing.T) {
 	n := &inbox{blocked: map[string]bool{"9": true}}
 	w := newWatcher(t, &fakeBoards{flights: []aena.Flight{flight()}}, n, morning)
-	if _, err := w.Add(context.Background(), "9", "BCN", aena.Departures, "18/10/2026", "FR2495"); err != telegram.ErrBlocked {
+	if _, err := w.Add(context.Background(), "9", "BCN", aena.Departures, "18/10/2026", "FR2495", ""); err != telegram.ErrBlocked {
 		t.Errorf("got %v, want ErrBlocked", err)
 	}
 	if len(w.List("9")) != 0 {
@@ -230,7 +230,7 @@ func TestBlockedBotIsNotFollowed(t *testing.T) {
 func TestFinishedFlightsAreDroppedLater(t *testing.T) {
 	b := &fakeBoards{flights: []aena.Flight{flight()}}
 	w := newWatcher(t, b, &inbox{}, morning)
-	if _, err := w.Add(context.Background(), "1", "BCN", aena.Departures, "18/10/2026", "FR2495"); err != nil {
+	if _, err := w.Add(context.Background(), "1", "BCN", aena.Departures, "18/10/2026", "FR2495", ""); err != nil {
 		t.Fatal(err)
 	}
 
@@ -255,7 +255,7 @@ func TestTrackedSurviveARestart(t *testing.T) {
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	w, _ := New(dir, b, &inbox{}, madrid, log)
 	w.now = func() time.Time { return morning }
-	if _, err := w.Add(context.Background(), "1", "BCN", aena.Departures, "18/10/2026", "FR2495"); err != nil {
+	if _, err := w.Add(context.Background(), "1", "BCN", aena.Departures, "18/10/2026", "FR2495", ""); err != nil {
 		t.Fatal(err)
 	}
 	again, err := New(dir, b, &inbox{}, madrid, log)
@@ -279,7 +279,7 @@ func TestOneMinuteWobbleIsNotNews(t *testing.T) {
 	b := &fakeBoards{flights: []aena.Flight{flight()}}
 	n := &inbox{}
 	w := newWatcher(t, b, n, morning)
-	if _, err := w.Add(context.Background(), "1", "BCN", aena.Departures, "18/10/2026", "FR2495"); err != nil {
+	if _, err := w.Add(context.Background(), "1", "BCN", aena.Departures, "18/10/2026", "FR2495", ""); err != nil {
 		t.Fatal(err)
 	}
 	for _, est := range []struct {
@@ -312,11 +312,11 @@ func TestStopButton(t *testing.T) {
 	n := &inbox{}
 	w := newWatcher(t, &fakeBoards{flights: []aena.Flight{flight()}}, n, morning)
 	w.StopButton = true
-	tr, err := w.Add(context.Background(), "42", "BCN", aena.Departures, "18/10/2026", "FR2495")
+	tr, err := w.Add(context.Background(), "42", "BCN", aena.Departures, "18/10/2026", "FR2495", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := n.msgs[0].keys.Stop; got != "u:BCN-S-18102026-FR2495" || len(got) > 64 {
+	if got := n.msgs[0].keys.Stop; got != "u:BCN-S-18102026-FR2495-1220" || len(got) > 64 {
 		t.Errorf("stop data %q", got)
 	}
 	if "42-"+strings.TrimPrefix(tr.StopData(), "u:") != tr.ID {
@@ -344,7 +344,7 @@ func TestTheWatchFollowsTheFlightToItsArrival(t *testing.T) {
 	w := newWatcher(t, (*fakeBoards)(nil), n, morning)
 	w.boards = b
 	w.Spanish = func(code string) bool { return code == "PMI" || code == "BCN" }
-	if _, err := w.Add(context.Background(), "1", "BCN", aena.Departures, "18/10/2026", "FR2495"); err != nil {
+	if _, err := w.Add(context.Background(), "1", "BCN", aena.Departures, "18/10/2026", "FR2495", ""); err != nil {
 		t.Fatal(err)
 	}
 
@@ -375,7 +375,7 @@ func TestNoArrivalWatchOutsideSpain(t *testing.T) {
 	n := &inbox{}
 	w := newWatcher(t, b, n, morning)
 	w.Spanish = func(string) bool { return false }
-	if _, err := w.Add(context.Background(), "1", "BCN", aena.Departures, "18/10/2026", "FR2495"); err != nil {
+	if _, err := w.Add(context.Background(), "1", "BCN", aena.Departures, "18/10/2026", "FR2495", ""); err != nil {
 		t.Fatal(err)
 	}
 	gone := flight()
@@ -392,7 +392,7 @@ func TestAGateThatComesBackIsNotNews(t *testing.T) {
 	b := &fakeBoards{flights: []aena.Flight{flight()}}
 	n := &inbox{}
 	w := newWatcher(t, b, n, morning)
-	if _, err := w.Add(context.Background(), "1", "BCN", aena.Departures, "18/10/2026", "FR2495"); err != nil {
+	if _, err := w.Add(context.Background(), "1", "BCN", aena.Departures, "18/10/2026", "FR2495", ""); err != nil {
 		t.Fatal(err)
 	}
 	for _, gate := range []string{"D84", "", "D84"} {
@@ -423,7 +423,7 @@ func TestWhatCannotWaitGoesAtOnce(t *testing.T) {
 	b := &fakeBoards{flights: []aena.Flight{flight()}}
 	n := &inbox{}
 	w := newWatcher(t, b, n, morning) // 10:00, departure 12:20
-	if _, err := w.Add(context.Background(), "1", "BCN", aena.Departures, "18/10/2026", "FR2495"); err != nil {
+	if _, err := w.Add(context.Background(), "1", "BCN", aena.Departures, "18/10/2026", "FR2495", ""); err != nil {
 		t.Fatal(err)
 	}
 
@@ -455,7 +455,7 @@ func TestAChangeThatMovesAgainWaitsAgain(t *testing.T) {
 	b := &fakeBoards{flights: []aena.Flight{flight()}}
 	n := &inbox{}
 	w := newWatcher(t, b, n, morning)
-	if _, err := w.Add(context.Background(), "1", "BCN", aena.Departures, "18/10/2026", "FR2495"); err != nil {
+	if _, err := w.Add(context.Background(), "1", "BCN", aena.Departures, "18/10/2026", "FR2495", ""); err != nil {
 		t.Fatal(err)
 	}
 	for _, est := range []struct {
@@ -490,7 +490,7 @@ func TestArrivalTimeWaitsForTheDestinationToSeeTakeoff(t *testing.T) {
 	w := newWatcher(t, (*fakeBoards)(nil), n, morning)
 	w.boards = b
 	w.Spanish = func(code string) bool { return code == "PMI" || code == "BCN" }
-	if _, err := w.Add(context.Background(), "1", "BCN", aena.Departures, "18/10/2026", "FR2495"); err != nil {
+	if _, err := w.Add(context.Background(), "1", "BCN", aena.Departures, "18/10/2026", "FR2495", ""); err != nil {
 		t.Fatal(err)
 	}
 
@@ -527,7 +527,7 @@ func TestHistoryKeepsEachStatusOnce(t *testing.T) {
 	b := &fakeBoards{flights: []aena.Flight{flight()}}
 	w := newWatcher(t, b, &inbox{}, morning)
 	for _, chat := range []string{"1", "2"} {
-		if _, err := w.Add(context.Background(), chat, "BCN", aena.Departures, "18/10/2026", "FR2495"); err != nil {
+		if _, err := w.Add(context.Background(), chat, "BCN", aena.Departures, "18/10/2026", "FR2495", ""); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -579,5 +579,90 @@ func TestCollectWritesEachChangeOnce(t *testing.T) {
 	lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
 	if len(lines) != 3 || !strings.Contains(lines[2], `"gate":"D84"`) {
 		t.Errorf("want two flights and one gate change:\n%s", raw)
+	}
+}
+
+// arrivalAt is a BCN arrival of VY3011 from LPA, as AENA lists it.
+func arrivalAt(date, scheduled, status string) aena.Flight {
+	return aena.Flight{
+		ID: date + "-VY3011-" + strings.ReplaceAll(scheduled, ":", ""), Number: "VY3011", Direction: aena.Arrivals,
+		Airport: "BCN", Other: "LPA", Date: date, Scheduled: scheduled, Status: status, StatusLabel: aena.StatusLabel(status),
+		Final: status == "CAN",
+	}
+}
+
+// BCN on 20/10/2026: last night's VY3011 landing at 00:20 was cancelled; that afternoon's lands at 21:00.
+func TestAFollowedRowIsNotMistakenForAnotherOfTheSameNumber(t *testing.T) {
+	b := &fakeBoards{flights: []aena.Flight{arrivalAt("20/10/2026", "00:20", "CAN"), arrivalAt("20/10/2026", "21:00", "SCH")}}
+	n := &inbox{}
+	w := newWatcher(t, b, n, morning)
+	tr, err := w.Add(context.Background(), "1", "BCN", aena.Arrivals, "20/10/2026", "VY3011", "21:00")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tr.Last.Scheduled != "21:00" || strings.Contains(n.msgs[0].text, "Cancelled") {
+		t.Fatalf("followed the other row: %+v", tr.Last)
+	}
+	w.Check(context.Background())
+	if len(n.msgs) != 1 {
+		t.Errorf("the cancelled row reached the chat: %s", n.msgs[len(n.msgs)-1].text)
+	}
+}
+
+func TestLeavingOnPicksTheFlightThatLeavesThatDay(t *testing.T) {
+	day := func(d string) time.Time { at, _ := time.ParseInLocation("02/01/2006", d, madrid); return at }
+	board := []aena.Flight{
+		arrivalAt("20/10/2026", "00:20", "CAN"),
+		arrivalAt("20/10/2026", "21:00", "SCH"),
+		arrivalAt("21/10/2026", "00:20", "SCH"),
+	}
+	cases := []struct {
+		leaves string
+		want   string
+	}{
+		{"19/10/2026", "20/10/2026 00:20"},
+		{"20/10/2026", "20/10/2026 21:00"},
+		{"21/10/2026", "21/10/2026 00:20"},
+	}
+	for _, c := range cases {
+		f := LeavingOn(board, day(c.leaves), "VY3011")
+		if f == nil || f.Date+" "+f.Scheduled != c.want {
+			t.Errorf("leaving %s: got %+v, want %s", c.leaves, f, c.want)
+		}
+	}
+	if f := LeavingOn(board, day("22/10/2026"), "VY3011"); f != nil {
+		t.Errorf("found a flight that leaves on a day not on the board: %+v", f)
+	}
+}
+
+func TestTheArrivalIsTheOneAfterTheDeparture(t *testing.T) {
+	w := newWatcher(t, &fakeBoards{}, &inbox{}, morning)
+	board := []aena.Flight{
+		arrivalAt("20/10/2026", "00:20", "CAN"),
+		arrivalAt("20/10/2026", "21:00", "SCH"),
+		arrivalAt("21/10/2026", "00:20", "SCH"),
+	}
+	dep := aena.Flight{Number: "VY3011", Direction: aena.Departures, Airport: "LPA", Other: "BCN", Date: "20/10/2026", Scheduled: "21:20"}
+	if f := w.arrivalAfter(board, dep); f == nil || f.Date != "21/10/2026" {
+		t.Errorf("an evening departure lands after midnight, got %+v", f)
+	}
+	dep.Scheduled = "17:00"
+	if f := w.arrivalAfter(board, dep); f == nil || f.Scheduled != "21:00" {
+		t.Errorf("an afternoon departure lands that evening, got %+v", f)
+	}
+}
+
+func TestHistoryDoesNotRepeatAfterARestart(t *testing.T) {
+	path := t.TempDir() + "/history.jsonl"
+	f := flight()
+	if err := NewHistory(path).Record(f, madrid, morning); err != nil {
+		t.Fatal(err)
+	}
+	if err := NewHistory(path).Record(f, madrid, morning.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(path)
+	if n := strings.Count(string(raw), "\n"); n != 1 {
+		t.Errorf("want one line across the restart, got %d:\n%s", n, raw)
 	}
 }

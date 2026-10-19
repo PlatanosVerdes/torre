@@ -262,7 +262,7 @@ export class TorreApp extends LitElement {
       if (this.pendingOpen) {
         const wanted = this.pendingOpen;
         this.pendingOpen = '';
-        const f = this.flights.find(f => f.id === wanted || f.number === wanted.toUpperCase());
+        const f = this.flights.find(f => f.id === wanted || f.id.startsWith(wanted + '-') || f.number === wanted.toUpperCase());
         if (f) this.#openFlight(f);
       }
     } catch (e) {
@@ -347,10 +347,10 @@ export class TorreApp extends LitElement {
     this.sheet = { kind: 'flight', flight, trackedId: t?.id || '' };
   }
 
-  async #follow(airport, direction, date, number) {
+  async #follow(airport, direction, date, number, scheduled) {
     this.busy = true;
     try {
-      const t = await this.api.follow(airport, direction, date, number);
+      const t = await this.api.follow(airport, direction, date, number, scheduled);
       this.#toast(t.last ? (this.notify ? 'Following. Check Telegram.' : 'Following') : 'Saved. AENA publishes it about two weeks before.');
       this.sheet = null;
       this.#loadTracked();
@@ -491,7 +491,7 @@ export class TorreApp extends LitElement {
     if (s?.kind === 'flight') {
       return html`<flight-details .flight=${s.flight} .trackedId=${s.trackedId} ?canFollow=${this.canFollow}
         ?notify=${this.notify} .bot=${this.bot} ?busy=${this.busy}
-        @follow=${e => { const f = e.detail.flight; this.#follow(f.airport, f.direction, f.date, f.number); }}
+        @follow=${e => { const f = e.detail.flight; this.#follow(f.airport, f.direction, f.date, f.number, f.scheduled); }}
         @unfollow=${e => this.#unfollow(e.detail.id)}></flight-details>`;
     }
     if (s?.kind === 'pass') {

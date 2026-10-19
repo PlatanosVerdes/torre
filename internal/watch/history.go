@@ -1,6 +1,7 @@
 package watch
 
 import (
+	"bufio"
 	"encoding/json"
 	"os"
 	"sync"
@@ -43,8 +44,30 @@ type remembered struct {
 // maxRemembered bounds the states kept to skip repeats; past it, flights over two days old go.
 const maxRemembered = 20000
 
+// NewHistory picks up where the file left off, so a restart does not write every flight again.
 func NewHistory(path string) *History {
-	return &History{path: path, last: map[string]remembered{}}
+	h := &History{path: path, last: map[string]remembered{}}
+	file, err := os.Open(path)
+	if err != nil {
+		return h
+	}
+	defer file.Close()
+	lines := bufio.NewScanner(file)
+	for lines.Scan() {
+		var s Seen
+		if json.Unmarshal(lines.Bytes(), &s) == nil {
+			h.last[s.key()] = remembered{s.state(), s.Scheduled}
+		}
+	}
+	return h
+}
+
+func (s Seen) key() string {
+	return s.Airport + "|" + string(s.Direction) + "|" + s.Date + "|" + s.Number + "|" + s.Scheduled.Format("15:04")
+}
+
+func (s Seen) state() string {
+	return s.Status + "|" + s.Expected.Format(time.RFC3339) + "|" + s.Gate + "|" + s.Belt
 }
 
 func (h *History) Record(f aena.Flight, zone *time.Location, now time.Time) error {
@@ -64,8 +87,7 @@ func (h *History) Record(f aena.Flight, zone *time.Location, now time.Time) erro
 		}
 		s.Expected, _ = time.ParseInLocation("02/01/2006 15:04", date+" "+f.Estimated, zone)
 	}
-	key := f.Airport + "|" + string(f.Direction) + "|" + f.ID
-	state := s.Status + "|" + s.Expected.Format(time.RFC3339) + "|" + s.Gate + "|" + s.Belt
+	key, state := s.key(), s.state()
 
 	h.mu.Lock()
 	defer h.mu.Unlock()

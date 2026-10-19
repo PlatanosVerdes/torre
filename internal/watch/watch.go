@@ -28,8 +28,11 @@ type Tracked struct {
 	Direction aena.Direction `json:"direction"`
 	Date      string         `json:"date"`
 	Number    string         `json:"number"`
-	Added     time.Time      `json:"added"`
-	Last      *aena.Flight   `json:"last,omitempty"`
+	// Scheduled tells apart the rows one number can have on a date. Until it is known, Date is the
+	// day the flight leaves, which on an arrivals board can be the day before its row.
+	Scheduled string       `json:"scheduled,omitempty"`
+	Added     time.Time    `json:"added"`
+	Last      *aena.Flight `json:"last,omitempty"`
 	// Notified is the state the chat was last told about. Changes are measured from it, not from
 	// Last, so a time creeping a minute per check still adds up to a message.
 	Notified *aena.Flight `json:"notified,omitempty"`
@@ -143,7 +146,8 @@ func sortKey(t Tracked) string {
 }
 
 // Add starts following a flight and sends its current state, so the chat confirms it took.
-func (w *Watcher) Add(ctx context.Context, chat, airport string, dir aena.Direction, date, number string) (Tracked, error) {
+// scheduled is the row's time when the board showed it; without it, date is the day it leaves.
+func (w *Watcher) Add(ctx context.Context, chat, airport string, dir aena.Direction, date, number, scheduled string) (Tracked, error) {
 	airport, number = strings.ToUpper(airport), aena.Canonical(number)
 	day, err := time.ParseInLocation("02/01/2006", date, w.zone)
 	if err != nil {
@@ -151,7 +155,7 @@ func (w *Watcher) Add(ctx context.Context, chat, airport string, dir aena.Direct
 	}
 	now := w.now()
 
-	f, err := w.find(ctx, airport, dir, date, number)
+	f, err := w.find(ctx, airport, dir, date, number, scheduled)
 	if err != nil {
 		return Tracked{}, err
 	}
@@ -159,12 +163,16 @@ func (w *Watcher) Add(ctx context.Context, chat, airport string, dir aena.Direct
 		return Tracked{}, fmt.Errorf("%w: %s is not on AENA's %s board for %s", ErrNotFound, number, airport, date)
 	}
 	if f != nil {
-		number = f.Number
+		number, date, scheduled = f.Number, f.Date, f.Scheduled
+	}
+	id := []string{chat, airport, string(dir), strings.ReplaceAll(date, "/", ""), aena.Canonical(number)}
+	if scheduled != "" {
+		id = append(id, strings.ReplaceAll(scheduled, ":", ""))
 	}
 	t := Tracked{
-		ID:      strings.Join([]string{chat, airport, string(dir), strings.ReplaceAll(date, "/", ""), aena.Canonical(number)}, "-"),
+		ID:      strings.Join(id, "-"),
 		Chat:    chat,
-		Airport: airport, Direction: dir, Date: date, Number: number,
+		Airport: airport, Direction: dir, Date: date, Number: number, Scheduled: scheduled,
 		Added: now, Last: f, Notified: f,
 	}
 
@@ -240,7 +248,7 @@ func (w *Watcher) Check(ctx context.Context) {
 		}
 	}()
 	for _, t := range w.List("") {
-		f, err := w.find(ctx, t.Airport, t.Direction, t.Date, t.Number)
+		f, err := w.find(ctx, t.Airport, t.Direction, t.Date, t.Number, t.Scheduled)
 		if err != nil {
 			w.log.Warn("board unavailable", "airport", t.Airport, "err", err)
 			continue
@@ -256,6 +264,7 @@ func (w *Watcher) Check(ctx context.Context) {
 		}
 
 		w.record(*f, now)
+		t.Date, t.Scheduled = f.Date, f.Scheduled
 
 		if next, msg := w.landing(ctx, t, f); next != nil {
 			if err := w.notify.Send(ctx, t.Chat, msg, w.keys(*next)); err != nil {
@@ -397,21 +406,13 @@ func (w *Watcher) landing(ctx context.Context, t Tracked, f *aena.Flight) (*Trac
 	if err != nil {
 		return nil, ""
 	}
-	// An overnight flight lands on the next day's board.
-	var arr *aena.Flight
-	if day, err := time.ParseInLocation("02/01/2006", f.Date, w.zone); err == nil {
-		for _, d := range []time.Time{day, day.AddDate(0, 0, 1)} {
-			if arr = Find(flights, d.Format("02/01/2006"), f.Number); arr != nil {
-				break
-			}
-		}
-	}
+	arr := w.arrivalAfter(flights, *f)
 	if arr == nil {
 		return nil, ""
 	}
 	w.record(*arr, w.now())
 	next := t
-	next.Airport, next.Direction, next.Date = arr.Airport, aena.Arrivals, arr.Date
+	next.Airport, next.Direction, next.Date, next.Scheduled = arr.Airport, aena.Arrivals, arr.Date, arr.Scheduled
 	next.Last, next.Notified, next.FinalAt = arr, arr, nil
 	msg := fmt.Sprintf("%s\nStatus: <b>Departed</b>\n", Headline(*f))
 	if grounded[arr.Status] {
@@ -475,32 +476,92 @@ func (w *Watcher) past(date string, now time.Time) bool {
 	return err == nil && now.Sub(d) > 48*time.Hour
 }
 
-func (w *Watcher) find(ctx context.Context, airport string, dir aena.Direction, date, number string) (*aena.Flight, error) {
+func (w *Watcher) find(ctx context.Context, airport string, dir aena.Direction, date, number, scheduled string) (*aena.Flight, error) {
 	d, err := time.ParseInLocation("02/01/2006", date, w.zone)
 	if err == nil && d.Sub(w.now()) > published+48*time.Hour {
 		// Not even the two-week board reaches that far, so there is nothing to ask AENA yet.
 		return nil, nil
 	}
-	short := err != nil || d.Sub(w.now()) < 36*time.Hour
+	short := err != nil || d.AddDate(0, 0, 1).Sub(w.now()) < 36*time.Hour
 	flights, _, err := w.boards.Board(ctx, airport, dir, short)
 	if err != nil {
 		return nil, err
 	}
-	return Find(flights, date, number), nil
+	if scheduled == "" && dir == aena.Arrivals {
+		return LeavingOn(flights, d, number), nil
+	}
+	return Find(flights, date, number, scheduled), nil
 }
 
-func Find(flights []aena.Flight, date, number string) *aena.Flight {
-	number = aena.Canonical(number)
-	for i := range flights {
-		f := &flights[i]
-		if f.Date != date {
-			continue
-		}
-		if aena.Canonical(f.Number) == number {
+// Find returns the flight with that number on that date, at that scheduled time when one is
+// given, else the earliest.
+func Find(flights []aena.Flight, date, number, scheduled string) *aena.Flight {
+	for _, f := range FindAll(flights, date, number) {
+		if scheduled == "" || f.Scheduled == scheduled {
 			return f
 		}
-		for _, c := range append(f.Codeshare, f.ICAO...) {
-			if aena.Canonical(c) == number {
+	}
+	return nil
+}
+
+// FindAll returns every row of a number on a date, earliest first: one number can land twice on
+// a date (VY3011 at BCN on 20/10: 00:20 from the night before, 21:00 from that afternoon).
+func FindAll(flights []aena.Flight, date, number string) []*aena.Flight {
+	number = aena.Canonical(number)
+	var out []*aena.Flight
+	for i := range flights {
+		f := &flights[i]
+		if f.Date == date && carries(*f, number) {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+func carries(f aena.Flight, number string) bool {
+	if aena.Canonical(f.Number) == number {
+		return true
+	}
+	for _, c := range append(f.Codeshare, f.ICAO...) {
+		if aena.Canonical(c) == number {
+			return true
+		}
+	}
+	return false
+}
+
+// earlyHours is when a row on the day a flight leaves is still the previous evening's flight.
+const earlyHours = "06:00"
+
+// LeavingOn finds on an arrivals board the flight that leaves on day, knowing only that: a
+// boarding pass carries no time. It lands that day after the early hours, or in the early hours of
+// the next; a row of the early hours of day itself is taken only when nothing else matches.
+func LeavingOn(flights []aena.Flight, day time.Time, number string) *aena.Flight {
+	today, tomorrow := day.Format("02/01/2006"), day.AddDate(0, 0, 1).Format("02/01/2006")
+	for _, f := range FindAll(flights, today, number) {
+		if f.Scheduled >= earlyHours {
+			return f
+		}
+	}
+	for _, f := range FindAll(flights, tomorrow, number) {
+		if f.Scheduled < earlyHours {
+			return f
+		}
+	}
+	return Find(flights, today, number, "")
+}
+
+// arrivalAfter finds where a departed flight lands: the first row of its number scheduled after it
+// left, on its day or the next.
+func (w *Watcher) arrivalAfter(flights []aena.Flight, dep aena.Flight) *aena.Flight {
+	left, err := time.ParseInLocation("02/01/2006 15:04", dep.Date+" "+dep.Scheduled, w.zone)
+	if err != nil {
+		return nil
+	}
+	for _, d := range []time.Time{left, left.AddDate(0, 0, 1)} {
+		for _, f := range FindAll(flights, d.Format("02/01/2006"), dep.Number) {
+			at, err := time.ParseInLocation("02/01/2006 15:04", f.Date+" "+f.Scheduled, w.zone)
+			if err == nil && at.After(left) {
 				return f
 			}
 		}

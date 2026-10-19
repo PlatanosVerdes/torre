@@ -300,6 +300,7 @@ func (s *Server) addTracked(w http.ResponseWriter, r *http.Request) {
 		Direction string `json:"direction"`
 		Date      string `json:"date"`
 		Number    string `json:"number"`
+		Scheduled string `json:"scheduled"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 		s.fail(w, http.StatusBadRequest, err)
@@ -307,6 +308,10 @@ func (s *Server) addTracked(w http.ResponseWriter, r *http.Request) {
 	}
 	dir, ok := aena.ParseDirection(in.Direction)
 	in.Airport = strings.ToUpper(in.Airport)
+	if _, err := time.Parse("15:04", in.Scheduled); in.Scheduled != "" && err != nil {
+		s.fail(w, http.StatusBadRequest, errors.New("scheduled must be hh:mm"))
+		return
+	}
 	if !ok || len(in.Airport) != 3 || in.Number == "" || len(in.Number) > 10 {
 		s.fail(w, http.StatusBadRequest, errors.New("airport, direction, date and number are required"))
 		return
@@ -315,7 +320,7 @@ func (s *Server) addTracked(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, http.StatusBadRequest, errors.New("not an AENA airport"))
 		return
 	}
-	t, err := s.Watch.Add(r.Context(), chat, in.Airport, dir, in.Date, in.Number)
+	t, err := s.Watch.Add(r.Context(), chat, in.Airport, dir, in.Date, in.Number, in.Scheduled)
 	switch {
 	case errors.Is(err, telegram.ErrBlocked):
 		s.fail(w, http.StatusConflict, errors.New("open the bot and press Start first, so it can message you"))

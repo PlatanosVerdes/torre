@@ -394,7 +394,8 @@ func Normalize(rows []raw, dir Direction, zone *time.Location, now time.Time, se
 			}
 			f.ICAO = append(f.ICAO, m.flight.ICAO...)
 		}
-		f.ID = f.Date + "-" + f.Number
+		// A number can land twice on one date: last night's late flight and today's.
+		f.ID = f.Date + "-" + f.Number + "-" + strings.ReplaceAll(f.Scheduled, ":", "")
 		sort.Strings(f.Codeshare)
 		out = append(out, f)
 	}

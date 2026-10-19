@@ -16,11 +16,12 @@ export class Api {
 
   tracked() { return this.#call('api/tracked'); }
 
-  follow(airport, direction, date, number) {
+  // scheduled tells apart two rows of one number on a date; a boarding pass has none.
+  follow(airport, direction, date, number, scheduled = '') {
     return this.#call('api/tracked', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ airport, direction, date, number }),
+      body: JSON.stringify({ airport, direction, date, number, scheduled }),
     });
   }
 

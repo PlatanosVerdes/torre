@@ -1,4 +1,13 @@
-# torre
+<p align="center">
+  <img src="assets/bot-avatar.svg" width="96" alt="">
+</p>
+
+<h1 align="center">torre</h1>
+
+<p align="center">
+  <a href="https://github.com/PlatanosVerdes/torre/tags"><img src="https://img.shields.io/github/v/tag/PlatanosVerdes/torre?label=release&color=2f7d3a" alt="Latest release"></a>
+  <a href="https://t.me/TorreFlightsBot"><img src="https://img.shields.io/badge/telegram-@TorreFlightsBot-26a5e4?logo=telegram&logoColor=white" alt="Telegram @TorreFlightsBot"></a>
+</p>
 
 Departures and arrivals for every AENA airport on a page made for the phone, a Telegram message when
 a followed flight changes time, gate or status, and a boarding pass reader that follows the flight

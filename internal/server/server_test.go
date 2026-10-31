@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/PlatanosVerdes/torre/internal/adsbdb"
 	"github.com/PlatanosVerdes/torre/internal/aena"
 	"github.com/PlatanosVerdes/torre/internal/telegram"
 	"github.com/PlatanosVerdes/torre/internal/watch"
@@ -226,5 +227,39 @@ func TestAssetsAreVersioned(t *testing.T) {
 	}
 	if rec := do(h, "GET", "/static/000000000000/js/main.js", ""); rec.Code != 404 {
 		t.Errorf("another version's URL answered %d", rec.Code)
+	}
+}
+
+type fakeRoutes map[string]adsbdb.Route
+
+func (f fakeRoutes) Lookup(_ context.Context, callsign string) (adsbdb.Route, bool) {
+	r, ok := f[callsign]
+	return r, ok
+}
+
+func TestLocateFindsTheSpanishEnd(t *testing.T) {
+	s := newServer(t, "")
+	s.Routes = fakeRoutes{
+		"FR8631": {Origin: "BCN", Destination: "TNG"},
+		"FR3070": {Origin: "BCN", Destination: "PMI"},
+		"BA478":  {Origin: "LHR", Destination: "PMI"},
+		"BA1":    {Origin: "LHR", Destination: "JFK"},
+	}
+	h := s.Handler()
+	cases := map[string]string{
+		"fr8631":  `{"airport":"BCN","direction":"S"}`,
+		"FR 3070": `{"airport":"BCN","direction":"S"}`,
+		"BA0478":  `{"airport":"PMI","direction":"L"}`,
+	}
+	for number, want := range cases {
+		rec := do(h, "GET", "/api/locate?number="+url.QueryEscape(number), "")
+		if got := strings.TrimSpace(rec.Body.String()); rec.Code != http.StatusOK || got != want {
+			t.Errorf("%s: %d %s, want %s", number, rec.Code, got, want)
+		}
+	}
+	for _, number := range []string{"BA1", "XX999", ""} {
+		if rec := do(h, "GET", "/api/locate?number="+number, ""); rec.Code != http.StatusNotFound {
+			t.Errorf("%q: %d, want 404", number, rec.Code)
+		}
 	}
 }

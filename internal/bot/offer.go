@@ -59,12 +59,13 @@ func (b *Bot) offer(ctx context.Context, number, airport string) (string, telegr
 			break
 		}
 		airline = r.Airline
-		if b.spanish(r.Origin) {
-			example = r.Origin
-			boards = append(boards, board{r.Origin, aena.Departures})
-		} else if b.spanish(r.Destination) {
-			example = r.Destination
-			boards = append(boards, board{r.Destination, aena.Arrivals})
+		if end, departs, ok := r.SpanishEnd(b.spanish); ok {
+			example = end
+			dir := aena.Arrivals
+			if departs {
+				dir = aena.Departures
+			}
+			boards = append(boards, board{end, dir})
 		}
 	}
 
@@ -244,8 +245,8 @@ func gate(f aena.Flight) string {
 	if f.Terminal != "" {
 		parts = append(parts, "Terminal "+esc(f.Terminal))
 	}
-	if f.Gate != "" {
-		parts = append(parts, "Gate <b>"+esc(f.Gate)+"</b>")
+	if g := watch.Gate(f); g != "" {
+		parts = append(parts, "Gate <b>"+esc(g)+"</b>")
 	}
 	return strings.Join(parts, " · ")
 }

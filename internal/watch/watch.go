@@ -599,8 +599,8 @@ func Diff(old, cur aena.Flight) []string {
 		out = append(out, line)
 	}
 	// A gate taken away tells nobody where to go: wait for the next one.
-	if old.Gate != cur.Gate && cur.Gate != "" {
-		out = append(out, fmt.Sprintf("Gate: %s → <b>%s</b>", dash(old.Gate), dash(cur.Gate)))
+	if was, now := Gate(old), Gate(cur); was != now && now != "" {
+		out = append(out, fmt.Sprintf("Gate: %s → <b>%s</b>", dash(was), dash(now)))
 	}
 	if old.Terminal != cur.Terminal {
 		out = append(out, fmt.Sprintf("Terminal: %s → <b>%s</b>", dash(old.Terminal), dash(cur.Terminal)))
@@ -653,13 +653,21 @@ func Describe(t Tracked) string {
 	if f.Terminal != "" {
 		lines = append(lines, "Terminal "+esc(f.Terminal))
 	}
-	if f.Gate != "" {
-		lines = append(lines, "Gate <b>"+esc(f.Gate)+"</b>")
+	if g := Gate(*f); g != "" {
+		lines = append(lines, "Gate <b>"+esc(g)+"</b>")
 	}
 	if f.Belt != "" {
 		lines = append(lines, "Belt "+esc(f.Belt))
 	}
 	return strings.Join(lines, "\n")
+}
+
+// Gate is where a departure boards: its gate, or until it has one, the zone AENA names.
+func Gate(f aena.Flight) string {
+	if f.Gate != "" {
+		return f.Gate
+	}
+	return f.Zone
 }
 
 func dash(s string) string {

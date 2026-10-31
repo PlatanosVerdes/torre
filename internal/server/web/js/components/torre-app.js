@@ -148,7 +148,7 @@ export class TorreApp extends LitElement {
   connectedCallback() {
     super.connectedCallback();
     this.#saveUrl();
-    this.#loadAirports().then(() => this.#loadBoard()).then(() => this.#loadWorld()).then(() => this.#locate());
+    this.#loadAirports().then(() => this.#findFlight()).then(() => this.#loadBoard()).then(() => this.#loadWorld()).then(() => this.#locate());
     this.#loadTracked();
     this.onVisible = () => document.visibilityState === 'visible' && this.#refresh();
     document.addEventListener('visibilitychange', this.onVisible);
@@ -512,7 +512,7 @@ export class TorreApp extends LitElement {
     // Read now: once dispatch ends, an event from inside a shadow root has no target any more.
     const value = e.target.value;
     clearTimeout(this.searchTimer);
-    this.searchTimer = setTimeout(() => { this.query = value; this.#saveUrl(); this.#lookElsewhere(); }, 120);
+    this.searchTimer = setTimeout(() => { this.query = value; this.#saveUrl(); this.#lookElsewhere(); this.#findFlight(); }, 120);
   }
 
   // lookElsewhere covers "I typed a flight number, but it lands here rather than leaves": when a
@@ -533,6 +533,19 @@ export class TorreApp extends LitElement {
     } catch {
       this.other = null;
     }
+  }
+
+  // findFlight starts the route from a flight number typed with no airport, at its Spanish end.
+  async #findFlight() {
+    const query = this.query;
+    if (this.#route() || !isFlightNumber(query)) return;
+    try {
+      const at = await this.api.locate(canonical(query));
+      if (this.query !== query || this.#route()) return;
+      this.locating = false;
+      if (at.direction === 'S') this.#setRoute(at.airport, '');
+      else this.#setRoute('', at.airport);
+    } catch {}
   }
 
   #onFile(e) {

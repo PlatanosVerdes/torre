@@ -703,3 +703,17 @@ func TestSampleFollowsFlightsDueSoonAndKeepsThemOffTelegram(t *testing.T) {
 		t.Errorf("topping up followed a flight twice: %d", n)
 	}
 }
+
+func TestZoneStandsInForTheGate(t *testing.T) {
+	old := aena.Flight{Direction: aena.Departures, Status: "SCH"}
+	cur := old
+	cur.Zone = "R/S/U"
+	if d := Diff(old, cur); len(d) != 1 || d[0] != "Gate: — → <b>R/S/U</b>" {
+		t.Errorf("zone appearing: %v", d)
+	}
+	old = cur
+	cur.Zone, cur.Gate = "", "R13"
+	if d := Diff(old, cur); len(d) != 1 || d[0] != "Gate: R/S/U → <b>R13</b>" {
+		t.Errorf("gate after zone: %v", d)
+	}
+}

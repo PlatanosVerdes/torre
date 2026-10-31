@@ -258,3 +258,27 @@ func TestICAONumbers(t *testing.T) {
 		t.Errorf("icao = %v", f.ICAO)
 	}
 }
+
+func TestZoneBeforeTheGate(t *testing.T) {
+	// BCN names the gate area in puertaSegunda while puertaPrimera is still empty (EC1030, 26/10/2026).
+	cases := []struct {
+		gate, gate2 string
+		dir         Direction
+		wantGate    string
+		wantZone    string
+	}{
+		{"null", "RSU", Departures, "", "R/S/U"},
+		{"null", "A", Departures, "", "A"},
+		{"R13", "null", Departures, "R13", ""},
+		{"S12", "S14", Departures, "S12/S14", ""},
+		{"null", "A", Arrivals, "/A", ""},
+	}
+	for _, c := range cases {
+		r := row("1030", "EC", "", "08:55", "08:55", "SCH")
+		r.Gate, r.Gate2 = c.gate, c.gate2
+		f := Normalize([]raw{r}, c.dir, madrid, at("18/10/2026 06:00"), nil)[0]
+		if f.Gate != c.wantGate || f.Zone != c.wantZone {
+			t.Errorf("%s+%s %s: gate %q zone %q, want %q %q", c.gate, c.gate2, c.dir, f.Gate, f.Zone, c.wantGate, c.wantZone)
+		}
+	}
+}

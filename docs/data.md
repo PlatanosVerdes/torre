@@ -64,9 +64,13 @@ and the page says it is showing close matches.
   and the flight sheet says AENA lists it as departed, with a link to look the flight up elsewhere.
   No airline publishes a status API that could settle it, so the page does not pretend to.
 - **A departure's gate zone comes before its gate.** Barcelona fills `puertaSegunda` with the zone
-  letters while `puertaPrimera` is still empty (`RSU`, `WY`, `A`, `D`), often two days ahead. It shows
-  as gate "R/S/U" until the gate arrives. `A` covers the A, B and C gates, `D` the D and E gates.
-  `salaPrimera` is the arrivals baggage hall, never a departure zone.
+  letters while `puertaPrimera` is still empty (`RSU`, `WY`, `A`, `D`), often two days ahead. A zone
+  is not always the gate's letter: BCN's `A` is the Schengen side of T1 and ends at A, B or C gates.
+  So `aena.Zones` watches every departure go from a zone to a gate and learns, per airport and
+  zone, which letters it leads to; once a zone has 10 flights, it shows as those letters ("A/B/C"),
+  counting a letter seen at least 3 times and in 5% of them. What it learnt is kept in
+  `zones.json` in the data directory, and past 1000 flights a zone's counts are halved so a
+  reshuffle of gates wins. `salaPrimera` is the arrivals baggage hall, never a departure zone.
 
 ## Status codes
 

@@ -70,6 +70,7 @@ func run() error {
 	}
 
 	client := aena.New(aenaURL, ttl)
+	client.Zones = aena.NewZones(filepath.Join(dataDir, "zones.json"))
 	var notifier watch.Notifier = tg
 	if sample > 0 {
 		notifier = &watch.SampleNotifier{Next: tg, Path: filepath.Join(dataDir, "sample.jsonl"), Now: time.Now}

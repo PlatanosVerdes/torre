@@ -143,6 +143,8 @@ type Client struct {
 	TTL     time.Duration
 	// Series tells which airline flies a codeshare flight, and learns from every board fetched.
 	Series *Series
+	// Zones learns which gates a departure's zone leads to and names the zone by them.
+	Zones *Zones
 
 	mu       sync.Mutex
 	boards   map[string]*entry
@@ -182,6 +184,7 @@ func New(baseURL string, ttl time.Duration) *Client {
 		boards:   map[string]*entry{},
 		fullSlot: make(chan struct{}, 1),
 		Series:   NewSeries(),
+		Zones:    NewZones(""),
 	}
 }
 
@@ -290,7 +293,10 @@ func (c *Client) fetch(ctx context.Context, airport string, dir Direction, short
 	if err := c.getJSON(ctx, "/sites/Satellite?"+q.Encode(), &rows); err != nil {
 		return nil, err
 	}
-	return Normalize(rows, dir, c.Zone, time.Now(), c.Series), nil
+	flights := Normalize(rows, dir, c.Zone, time.Now(), c.Series)
+	c.Zones.Learn(flights)
+	c.Zones.Label(flights)
+	return flights, nil
 }
 
 func (c *Client) getJSON(ctx context.Context, path string, v any) error {

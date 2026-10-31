@@ -14,6 +14,8 @@ export class Api {
     return this.#call(`api/board?airport=${encodeURIComponent(airport)}&dir=${dir}${full ? '&range=full' : ''}`);
   }
 
+  locate(number) { return this.#call(`api/locate?number=${encodeURIComponent(number)}`); }
+
   tracked() { return this.#call('api/tracked'); }
 
   // scheduled tells apart two rows of one number on a date; a boarding pass has none.

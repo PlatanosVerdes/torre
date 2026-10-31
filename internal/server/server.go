@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/PlatanosVerdes/torre/internal/adsbdb"
 	"github.com/PlatanosVerdes/torre/internal/aena"
 	"github.com/PlatanosVerdes/torre/internal/limit"
 	"github.com/PlatanosVerdes/torre/internal/places"
@@ -34,8 +35,14 @@ type Board interface {
 	Airports(ctx context.Context) ([]aena.Airport, error)
 }
 
+type Routes interface {
+	Lookup(ctx context.Context, callsign string) (adsbdb.Route, bool)
+}
+
 type Server struct {
-	Board   Board
+	Board Board
+	// Routes finds which Spanish airport a flight number leaves or reaches, for a search with no route.
+	Routes  Routes
 	Watch   *watch.Watcher
 	Bot     *telegram.Bot
 	Version string
@@ -89,6 +96,7 @@ func (s *Server) Handler() http.Handler {
 	})
 	mux.HandleFunc("GET /api/airports", s.limited(s.api, s.airports))
 	mux.HandleFunc("GET /api/board", s.limited(s.api, s.board))
+	mux.HandleFunc("GET /api/locate", s.limited(s.api, s.locate))
 	mux.HandleFunc("GET /api/places", s.limited(s.api, s.places))
 	mux.HandleFunc("GET /api/tracked", s.limited(s.api, s.listTracked))
 	mux.HandleFunc("POST /api/tracked", s.limited(s.follow, s.addTracked))
@@ -264,6 +272,30 @@ func (s *Server) board(w http.ResponseWriter, r *http.Request) {
 		"updated":   at.Unix(),
 		"flights":   flights,
 	})
+}
+
+// locate names the board a flight number is on when the visitor gave no airport.
+func (s *Server) locate(w http.ResponseWriter, r *http.Request) {
+	number := aena.Canonical(strings.ToUpper(strings.TrimSpace(r.URL.Query().Get("number"))))
+	if number == "" || s.Routes == nil {
+		s.fail(w, http.StatusNotFound, errors.New("unknown flight"))
+		return
+	}
+	route, ok := s.Routes.Lookup(r.Context(), number)
+	if !ok {
+		s.fail(w, http.StatusNotFound, errors.New("unknown flight"))
+		return
+	}
+	airport, departs, ok := route.SpanishEnd(func(code string) bool { return s.known(r.Context(), code) })
+	if !ok {
+		s.fail(w, http.StatusNotFound, errors.New("not a flight from or to a Spanish airport"))
+		return
+	}
+	dir := aena.Arrivals
+	if departs {
+		dir = aena.Departures
+	}
+	s.json(w, r, map[string]any{"airport": airport, "direction": dir})
 }
 
 // view is what a chat sees of its own followed flights; the chat id stays on the server.

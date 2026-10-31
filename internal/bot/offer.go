@@ -59,12 +59,13 @@ func (b *Bot) offer(ctx context.Context, number, airport string) (string, telegr
 			break
 		}
 		airline = r.Airline
-		if b.spanish(r.Origin) {
-			example = r.Origin
-			boards = append(boards, board{r.Origin, aena.Departures})
-		} else if b.spanish(r.Destination) {
-			example = r.Destination
-			boards = append(boards, board{r.Destination, aena.Arrivals})
+		if end, departs, ok := r.SpanishEnd(b.spanish); ok {
+			example = end
+			dir := aena.Arrivals
+			if departs {
+				dir = aena.Departures
+			}
+			boards = append(boards, board{end, dir})
 		}
 	}
 

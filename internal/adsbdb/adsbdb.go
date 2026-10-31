@@ -30,6 +30,18 @@ type Route struct {
 	Destination string
 }
 
+// SpanishEnd is the end of the route on an AENA board: the origin's departures, else the
+// destination's arrivals.
+func (r Route) SpanishEnd(spanish func(string) bool) (airport string, departs, ok bool) {
+	switch {
+	case spanish(r.Origin):
+		return r.Origin, true, true
+	case spanish(r.Destination):
+		return r.Destination, false, true
+	}
+	return "", false, false
+}
+
 type Client struct {
 	BaseURL string
 	HTTP    *http.Client

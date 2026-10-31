@@ -94,6 +94,7 @@ func run() error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	routes := adsbdb.New(adsbdbURL)
 	ownBot := readBot && tg.Enabled() && publicURL != ""
 	watcher.StopButton = ownBot
 	go watcher.Run(ctx, every)
@@ -106,7 +107,7 @@ func run() error {
 	}
 	if ownBot {
 		b := &bot.Bot{TG: tg, Watch: watcher, BaseURL: publicURL, Version: buildVersion, Log: log,
-			Routes: adsbdb.New(adsbdbURL), Boards: client, Spanish: watcher.Spanish, Zone: client.Zone}
+			Routes: routes, Boards: client, Spanish: watcher.Spanish, Zone: client.Zone}
 		if statsAddr != "" {
 			rec, err := botstats.Open(filepath.Join(dataDir, "bot-stats.json"))
 			if err != nil {
@@ -122,7 +123,7 @@ func run() error {
 	srv := &http.Server{
 		Addr: ":" + strconv.Itoa(port),
 		Handler: (&server.Server{
-			Board: client, Watch: watcher, Bot: tg, Version: buildVersion, Log: log,
+			Board: client, Routes: routes, Watch: watcher, Bot: tg, Version: buildVersion, Log: log,
 			OwnerChat: owner, ClientIPHeader: ipHeader, BotName: botName,
 		}).Handler(),
 		ReadHeaderTimeout: 5 * time.Second,

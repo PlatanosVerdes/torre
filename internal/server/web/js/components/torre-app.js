@@ -90,6 +90,7 @@ export class TorreApp extends LitElement {
     .list { background: var(--card); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
     .empty, .error { padding: 24px 12px; text-align: center; color: var(--muted); }
     .error { color: var(--bad); }
+    .empty .link { border: 0; background: none; padding: 0; color: var(--accent); font: inherit; font-weight: 600; cursor: pointer; }
     .pending { padding: 12px; color: var(--muted); font-size: 14px; border-top: 1px solid var(--line); }
     .pending:first-child { border-top: 0; }
     .pending b { color: var(--ink); }
@@ -297,11 +298,12 @@ export class TorreApp extends LitElement {
     const compact = norm(this.query).replace(/\s+/g, '');
     // A flight number is looked for on every loaded day: the user knows the flight, not the date.
     const anyDay = isFlightNumber(this.query);
-    const inRoute = this.flights.filter(f =>
+    const onDay = this.flights.filter(f =>
       (!other || f.other === other) &&
-      (anyDay || !this.day || f.date === this.day) &&
-      (this.showDeparted || compact || !f.final));
-    return this.#search(inRoute);
+      (anyDay || !this.day || f.date === this.day));
+    const showFinal = this.showDeparted || compact;
+    const hidden = showFinal ? 0 : onDay.filter(f => f.final).length;
+    return { ...this.#search(showFinal ? onDay : onDay.filter(f => !f.final)), hidden };
   }
 
   #search(flights) {
@@ -408,7 +410,7 @@ export class TorreApp extends LitElement {
 
   render() {
     const route = this.#route();
-    const { flights: visible, fuzzy } = this.#visible();
+    const { flights: visible, fuzzy, hidden } = this.#visible();
     const places = this.#places();
     return html`
       <header>
@@ -438,7 +440,7 @@ export class TorreApp extends LitElement {
       <main>
         ${this.tracked.length ? html`<h2>Following</h2><div class="list">${this.tracked.map(t => this.#trackedRow(t))}</div>` : ''}
         <h2>${this.#heading(route)}</h2>
-        <div class="list" @flight-select=${e => this.#openFlight(e.detail.flight, e.detail.trackId)}>${this.#board(route, visible)}</div>
+        <div class="list" @flight-select=${e => this.#openFlight(e.detail.flight, e.detail.trackId)}>${this.#board(route, visible, hidden)}</div>
         ${this.other && !visible.length ? html`
           <h2>${this.other.dir === 'S' ? 'Departures' : 'Arrivals'} · ${this.other.airport}</h2>
           <div class="list" @flight-select=${e => this.#openFlight(e.detail.flight, e.detail.trackId)}>
@@ -456,7 +458,7 @@ export class TorreApp extends LitElement {
     return route.dir === 'S' ? `Departures · ${route.airport}` : `Arrivals · ${route.airport}`;
   }
 
-  #board(route, visible) {
+  #board(route, visible, hidden) {
     if (!route) {
       if (!this.airports.length && (this.from || this.to)) return html`<div class="empty">Loading…</div>`;
       if (this.from || this.to) {
@@ -469,7 +471,13 @@ export class TorreApp extends LitElement {
     if (!this.flights.length) return html`<div class="empty">Loading…</div>`;
     if (!visible.length) {
       if (this.other) return html`<div class="empty">Not on this board. It is on the ${this.other.dir === 'S' ? 'departures' : 'arrivals'} below.</div>`;
-      return html`<div class="empty">${this.query ? 'No flight matches' : 'No flights on this route that day'}${this.full ? '' : '. Try “Show more days”.'}</div>`;
+      if (this.query) return html`<div class="empty">No flight matches${this.full ? '' : '. Try “Show more days”.'}</div>`;
+      // The board lists every flight still to come, so an empty today means none are left.
+      if (this.day === madridDate()) {
+        return html`<div class="empty">No more flights today on this route.${hidden
+          ? html` <button class="link" @click=${() => { this.showDeparted = true; }}>Show departed (${hidden})</button>` : ''}</div>`;
+      }
+      return html`<div class="empty">No flights on this route that day${this.full ? '' : '. Try “Show more days”.'}</div>`;
     }
     const days = isFlightNumber(this.query);
     return repeat(visible.slice(0, MAX_ROWS), f => f.id, f => html`<flight-row .flight=${f} ?showDay=${days}></flight-row>`);

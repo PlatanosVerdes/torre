@@ -54,7 +54,7 @@ export class FlightRow extends LitElement {
   #where(f) {
     if (f.direction === 'L' && f.belt) return html`Belt <b>${f.belt}</b>`;
     if (f.gate) return html`Gate <b>${f.gate}</b>`;
-    if (f.zone) return html`Zone <b>${f.zone}</b>`;
+    if (f.zone) return html`Gate <b>${f.zone}</b>`;
     if (f.terminal) return html`<b>${f.terminal}</b>`;
     return '';
   }

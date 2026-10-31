@@ -65,7 +65,7 @@ and the page says it is showing close matches.
   No airline publishes a status API that could settle it, so the page does not pretend to.
 - **A departure's gate zone comes before its gate.** Barcelona fills `puertaSegunda` with the zone
   letters while `puertaPrimera` is still empty (`RSU`, `WY`, `A`, `D`), often two days ahead. It shows
-  as "Zone R/S/U" until the gate arrives. `A` covers the A, B and C gates, `D` the D and E gates.
+  as gate "R/S/U" until the gate arrives. `A` covers the A, B and C gates, `D` the D and E gates.
   `salaPrimera` is the arrivals baggage hall, never a departure zone.
 
 ## Status codes

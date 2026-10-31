@@ -3,7 +3,7 @@
 ## Following a flight
 
 Tap a flight, then "Follow". The service checks the board every `TORRE_CHECK_EVERY` and sends one
-message per change: status, time with the delay, gate zone, gate, terminal, belt, check-in desks.
+message per change: status, time with the delay, gate (or its zone until there is one), terminal, belt, check-in desks.
 
 A change is sent once it has stood for ten minutes. AENA's board flickers: a gate given, taken away
 and given back within minutes, a delay revised twice in a quarter of an hour. Held for ten minutes,

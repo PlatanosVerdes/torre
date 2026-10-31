@@ -602,6 +602,9 @@ func Diff(old, cur aena.Flight) []string {
 	if old.Gate != cur.Gate && cur.Gate != "" {
 		out = append(out, fmt.Sprintf("Gate: %s → <b>%s</b>", dash(old.Gate), dash(cur.Gate)))
 	}
+	if old.Zone != cur.Zone && cur.Zone != "" && cur.Gate == "" {
+		out = append(out, "Gate zone: <b>"+esc(cur.Zone)+"</b>")
+	}
 	if old.Terminal != cur.Terminal {
 		out = append(out, fmt.Sprintf("Terminal: %s → <b>%s</b>", dash(old.Terminal), dash(cur.Terminal)))
 	}
@@ -655,6 +658,8 @@ func Describe(t Tracked) string {
 	}
 	if f.Gate != "" {
 		lines = append(lines, "Gate <b>"+esc(f.Gate)+"</b>")
+	} else if f.Zone != "" {
+		lines = append(lines, "Gate zone <b>"+esc(f.Zone)+"</b>")
 	}
 	if f.Belt != "" {
 		lines = append(lines, "Belt "+esc(f.Belt))

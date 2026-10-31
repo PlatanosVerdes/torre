@@ -246,6 +246,8 @@ func gate(f aena.Flight) string {
 	}
 	if f.Gate != "" {
 		parts = append(parts, "Gate <b>"+esc(f.Gate)+"</b>")
+	} else if f.Zone != "" {
+		parts = append(parts, "Gate zone <b>"+esc(f.Zone)+"</b>")
 	}
 	return strings.Join(parts, " · ")
 }

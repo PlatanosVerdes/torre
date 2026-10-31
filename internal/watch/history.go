@@ -23,6 +23,7 @@ type Seen struct {
 	Scheduled time.Time      `json:"scheduled"`
 	Expected  time.Time      `json:"expected"`
 	Gate      string         `json:"gate,omitempty"`
+	Zone      string         `json:"zone,omitempty"`
 	Belt      string         `json:"belt,omitempty"`
 	At        time.Time      `json:"at"`
 }
@@ -67,7 +68,7 @@ func (s Seen) key() string {
 }
 
 func (s Seen) state() string {
-	return s.Status + "|" + s.Expected.Format(time.RFC3339) + "|" + s.Gate + "|" + s.Belt
+	return s.Status + "|" + s.Expected.Format(time.RFC3339) + "|" + s.Gate + "|" + s.Zone + "|" + s.Belt
 }
 
 func (h *History) Record(f aena.Flight, zone *time.Location, now time.Time) error {
@@ -76,7 +77,7 @@ func (h *History) Record(f aena.Flight, zone *time.Location, now time.Time) erro
 	}
 	s := Seen{
 		Number: f.Number, Date: f.Date, Airport: f.Airport, Direction: f.Direction, Other: f.Other,
-		Airline: f.Airline, Status: f.Status, Gate: f.Gate, Belt: f.Belt, At: now,
+		Airline: f.Airline, Status: f.Status, Gate: f.Gate, Zone: f.Zone, Belt: f.Belt, At: now,
 	}
 	s.Scheduled, _ = time.ParseInLocation("02/01/2006 15:04", f.Date+" "+f.Scheduled, zone)
 	s.Expected = s.Scheduled

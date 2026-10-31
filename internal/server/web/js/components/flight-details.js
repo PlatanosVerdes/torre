@@ -37,7 +37,7 @@ export class FlightDetails extends LitElement {
       [arr ? 'Expected arrival' : 'Expected departure', f.estimated || f.scheduled],
       ['Delay', f.delayMin > 0 ? delay(f.delayMin) : '—'],
       ['Terminal', f.terminal || '—'],
-      [arr ? 'Belt' : 'Gate', (arr ? f.belt : f.gate) || '—'],
+      arr ? ['Belt', f.belt || '—'] : f.gate || !f.zone ? ['Gate', f.gate || '—'] : ['Gate zone', f.zone],
     ];
     if (!arr) cells.push(['Check-in', f.counters || '—']);
     cells.push(['Scheduled', f.scheduled + (f.estimatedDate ? ` · now ${f.estimatedDate.slice(0, 5)}` : '')]);

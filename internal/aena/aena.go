@@ -90,6 +90,8 @@ type Flight struct {
 	Doubtful bool   `json:"doubtful,omitempty"`
 	Terminal string `json:"terminal,omitempty"`
 	Gate     string `json:"gate,omitempty"`
+	// Zone is the gate area AENA names for a departure before it has a gate ("A", "R/S/U" at BCN).
+	Zone     string `json:"zone,omitempty"`
 	Counters string `json:"counters,omitempty"`
 	Belt     string `json:"belt,omitempty"`
 	Aircraft string `json:"aircraft,omitempty"`
@@ -364,7 +366,7 @@ func Normalize(rows []raw, dir Direction, zone *time.Location, now time.Time, se
 	var order []string
 	for _, r := range rows {
 		f := toFlight(r, dir, zone, now)
-		key := strings.Join([]string{f.Date, f.Scheduled, f.Other, f.Terminal, f.Aircraft, f.Gate, f.Counters, f.Belt}, "|")
+		key := strings.Join([]string{f.Date, f.Scheduled, f.Other, f.Terminal, f.Aircraft, f.Gate, f.Zone, f.Counters, f.Belt}, "|")
 		// Iberia publishes a second row with an S suffix for the same flight.
 		if strings.HasSuffix(r.Number, "S") {
 			key += "|" + strings.TrimSuffix(f.Number, "S")
@@ -449,6 +451,16 @@ func operator(g []member, series *Series) int {
 	return found
 }
 
+// zoneLabel spells a run of zone letters ("RSU") as alternatives ("R/S/U").
+func zoneLabel(s string) string {
+	for _, c := range s {
+		if c < 'A' || c > 'Z' {
+			return s
+		}
+	}
+	return strings.Join(strings.Split(s, ""), "/")
+}
+
 func toFlight(r raw, dir Direction, zone *time.Location, now time.Time) Flight {
 	f := Flight{
 		Number:     clean(r.AirlineIATA) + clean(r.Number),
@@ -472,7 +484,11 @@ func toFlight(r raw, dir Direction, zone *time.Location, now time.Time) Flight {
 		f.ICAO = []string{icao + clean(r.Number)}
 	}
 	if g2 := clean(r.Gate2); g2 != "" && g2 != f.Gate {
-		f.Gate += "/" + g2
+		if f.Gate == "" && dir == Departures {
+			f.Zone = zoneLabel(g2)
+		} else {
+			f.Gate += "/" + g2
+		}
 	}
 	if b2 := clean(r.Belt2); b2 != "" && b2 != f.Belt {
 		f.Belt += "/" + b2
